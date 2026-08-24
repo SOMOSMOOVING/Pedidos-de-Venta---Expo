@@ -1,0 +1,16 @@
+{
+  "name": "Pedidos Mooving — Expo",
+  "short_name": "Pedidos",
+  "description": "Toma de pedidos para la expo: productos, clientes y escaneo de código de barras.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f3fb",
+  "theme_color": "#7b2ff7",
+  "lang": "es",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
