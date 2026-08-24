@@ -88,9 +88,14 @@
   }
   .login-box .btn{width:100%; margin-top:4px;}
   .login-error{color:var(--danger); font-size:13px; min-height:18px; margin-bottom:6px; font-weight:600;}
-  .hdr-titles{border-left:1px solid var(--line); padding-left:12px;}
-  .hdr-titles h1{margin:0; font-size:16px; font-weight:800; color:var(--ink);}
-  .hdr-titles p{margin:1px 0 0; font-size:11px; color:var(--muted);}
+  .hdr-titles{border-left:1px solid var(--line); padding-left:12px; min-width:0;}
+  .hdr-titles h1{margin:0; font-size:15px; font-weight:800; color:var(--ink); white-space:nowrap;}
+  .hdr-titles p{margin:1px 0 0; font-size:10.5px; color:var(--muted); line-height:1.25;}
+  @media (max-width:380px){
+    .hdr-top{gap:8px; padding:10px 12px 8px;}
+    .logo, .logo-fallback{height:28px;}
+    .hdr-titles p{display:none;}
+  }
   .rainbow{height:4px; background:var(--grad);}
   .wrap{padding:12px;}
   .card{
@@ -177,8 +182,12 @@
     border-top:1px solid var(--line); padding:10px 12px; display:flex; gap:10px; align-items:center;
     box-shadow:0 -2px 10px rgba(0,0,0,.06);
   }
-  .footer .sum{flex:1; font-size:13px; color:var(--muted);}
-  .footer .sum b{display:block; font-size:16px; color:var(--ink);}
+  .footer .sum{flex:1 1 auto; min-width:0; font-size:12px; color:var(--muted); line-height:1.25;}
+  .footer .sum b{display:block; font-size:15px; color:var(--ink); white-space:nowrap;
+                 overflow:hidden; text-overflow:ellipsis;}
+  .footer .btn{min-width:0; flex:0 0 auto; padding:12px 14px;}
+  #avisoInv{display:block; font-size:11px; font-weight:700; color:var(--danger); line-height:1.25;}
+  #avisoInv:empty{display:none;}
   .btn{
     padding:12px 16px; border-radius:10px; border:none; font-size:15px; font-weight:700; color:#fff;
     background:var(--brand); min-width:120px;
@@ -328,7 +337,8 @@
         <button class="btn" id="btnExpCli" disabled>Descargar clientes.json</button>
       </div>
       <div class="adm-help">
-        <b>Para que el cambio llegue a todos los celulares:</b> descargá el/los archivo(s) y subilos a la carpeta del sitio en Netlify (junto al index.html), reemplazando los anteriores. Volvé a publicar y, al reabrir la app con internet, se actualiza sola.
+        <b>Para que el cambio llegue a todos los celulares:</b> descargá el/los archivo(s) <b>.json</b> y subilos al repositorio de GitHub (botón <i>Add file → Upload files</i>, en la misma carpeta que el index.html), reemplazando los anteriores. GitHub Pages republica solo en 1-2 minutos y, al reabrir la app con internet, se actualiza sola.<br><br>
+        <b>Ojo:</b> los cambios que hacés acá valen solo en <u>este</u> celular hasta que subas el .json.
       </div>
     </div>
     <div class="foot"><button class="btn ghost" id="btnAdmCerrar" style="flex:1">Cerrar</button></div>
@@ -338,7 +348,8 @@
 <div class="footer">
   <div class="sum">
     Pedido actual
-    <b id="resumenLinea">0 productos · 0 UMV</b>
+    <b id="resumenLinea">0 prod. · 0 u.</b>
+    <span id="avisoInv"></span>
   </div>
   <button class="btn ghost" id="btnVer">Ver</button>
   <button class="btn" id="btnDescargar">Descargar</button>
@@ -349,6 +360,7 @@
     <h2>Resumen del pedido</h2>
     <div class="body" id="modalBody"></div>
     <div class="foot">
+      <button class="btn ghost" id="btnVaciar" style="min-width:0; padding:12px 12px; color:#d9480f">Vaciar</button>
       <button class="btn ghost" id="btnCerrar" style="flex:1">Seguir</button>
       <button class="btn" id="btnDescargar2" style="flex:1">Descargar</button>
     </div>
@@ -376,6 +388,22 @@ function guardar(){ try{ localStorage.setItem(KEY, JSON.stringify(estado)); }cat
 
 /* ====== RENDER ====== */
 const $ = s => document.querySelector(s);
+/* escapa texto para insertar en HTML: nombres con & < > " ' no rompen la lista */
+function escH(s){
+  return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+/* fecha de hoy en hora local (toISOString usa UTC y después de las 21 hs daba el día siguiente) */
+function hoyLocal(){
+  const d=new Date(), p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+/* nombre de archivo seguro: sin acentos ni signos (si no, el celular lo baja como "download" sin extensión) */
+function nombreArchivoSeguro(s){
+  const t = String(s==null?"":s).normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/[^A-Za-z0-9 ]+/g," ").trim().replace(/\s+/g,"_").slice(0,60);
+  return t || "SIN_CLIENTE";
+}
 
 /* ====== ACCESO ====== */
 const AUTH_USER = "admin";
@@ -495,49 +523,52 @@ function pintarLista(){
     aviso = `${items.length} producto(s) en el pedido. Buscá arriba para agregar más.`;
   }
 
-  cont.innerHTML = (aviso ? `<div class="aviso">${aviso}</div>` : "") + items.map(p=>{
+  cont.innerHTML = (aviso ? `<div class="aviso">${escH(aviso)}</div>` : "") + items.map(p=>{
     const units = estado.cant[p.codigo] || 0;
     const valido = units>0 && units % p.umv === 0;
-    let hint = "";
-    if(units>0){
-      if(valido) hint = `<div class="units ok">${units} u. = ${units/p.umv} UMV ✓</div>`;
-      else{
-        const bajo = Math.floor(units/p.umv)*p.umv;
-        const alto = bajo + p.umv;
-        hint = `<div class="units bad">No es múltiplo de ${p.umv}. Válido: ${bajo>0?bajo+' o ':''}${alto} u.</div>`;
-      }
-    }
     return `
-      <div class="prod ${valido?'active':''}">
+      <div class="prod ${valido?'active':''}" data-row="${escH(p.codigo)}">
         <div class="info">
-          <div class="code">${p.codigo}</div>
-          <div class="name">${p.nombre}</div>
+          <div class="code">${escH(p.codigo)}</div>
+          <div class="name">${escH(p.nombre)}</div>
           <div class="umv">UMV: ${p.umv} u. por bulto</div>
-          ${hint}
+          <div class="units">${textoHint(p, units)}</div>
         </div>
         <div class="stepper">
           <div class="qtyrow">
-            <button data-code="${p.codigo}" data-d="-1" title="Restar 1 UMV">−</button>
+            <button type="button" data-code="${escH(p.codigo)}" data-d="-1" title="Restar 1 UMV">−</button>
             <input class="qty ${units>0&&!valido?'bad':''}" type="number" inputmode="numeric" min="0"
-                   step="${p.umv}" data-code="${p.codigo}" value="${units>0?units:''}" placeholder="0">
-            <button data-code="${p.codigo}" data-d="1" title="Sumar 1 UMV">+</button>
+                   step="${p.umv}" data-code="${escH(p.codigo)}" value="${units>0?units:''}" placeholder="0">
+            <button type="button" data-code="${escH(p.codigo)}" data-d="1" title="Sumar 1 UMV">+</button>
           </div>
         </div>
       </div>`;
   }).join("");
 
-  // botones +/- (ajustan de a 1 UMV)
+  // botones +/- (ajustan de a 1 UMV).
+  // mousedown/touchstart: se ejecuta ANTES del blur del campo de cantidad, así el
+  // toque no se pierde cuando venías de escribir en otra fila.
   cont.querySelectorAll(".qtyrow button").forEach(b=>{
-    b.addEventListener("click", ()=>{
+    const aplicar = ev=>{
+      if(ev && ev.button) return;               // solo botón principal
       const code = b.getAttribute("data-code");
       const p = PRODUCTOS.find(x=>x.codigo===code);
+      if(!p) return;
       const d = parseInt(b.getAttribute("data-d"),10);
       const cur = estado.cant[code] || 0;
       // llevar al múltiplo y mover un bulto
       const base = Math.round(cur / p.umv) * p.umv;
       setUnidades(code, base + d*p.umv);
-      pintarLista(); pintarResumen();
-    });
+      const nuevo = estado.cant[code] || 0;
+      const el = b.parentNode.querySelector("input.qty");
+      if(el) el.value = nuevo>0 ? nuevo : "";
+      refrescarFila(code);
+      pintarResumen();
+    };
+    // pointerdown se dispara ANTES del blur del campo de cantidad de otra fila,
+    // así el toque no se pierde si venías de escribir en otro producto.
+    if(window.PointerEvent) b.addEventListener("pointerdown", aplicar);
+    else b.addEventListener("click", aplicar);
   });
 
   // entrada directa de unidades
@@ -545,21 +576,49 @@ function pintarLista(){
     const code = inp.getAttribute("data-code");
     inp.addEventListener("input", ()=>{
       setUnidades(code, parseInt(inp.value,10));
+      refrescarFila(code);
       pintarResumen();
-      const p = PRODUCTOS.find(x=>x.codigo===code);
-      const u = estado.cant[code]||0;
-      inp.classList.toggle("bad", u>0 && u % p.umv !== 0);
     });
-    // al salir del campo, redondea al múltiplo más cercano
+    // al salir del campo, ajusta al múltiplo (nunca a 0: mínimo 1 UMV) y avisa
     inp.addEventListener("blur", ()=>{
       const p = PRODUCTOS.find(x=>x.codigo===code);
+      if(!p) return;
       const u = estado.cant[code]||0;
       if(u>0 && u % p.umv !== 0){
-        setUnidades(code, Math.round(u/p.umv)*p.umv);
+        const nuevo = Math.max(p.umv, Math.round(u/p.umv)*p.umv);
+        setUnidades(code, nuevo);
+        const el = cont.querySelector(`input.qty[data-code="${cssEsc(code)}"]`);
+        if(el) el.value = nuevo;
+        toast(`Ajustado a ${nuevo} u. (múltiplo de ${p.umv})`);
       }
-      pintarLista(); pintarResumen();
+      refrescarFila(code);
+      pintarResumen();
     });
   });
+}
+
+/* texto del cartel de unidades de una fila */
+function textoHint(p, units){
+  if(!(units>0)) return "";
+  if(units % p.umv === 0) return `${units} u. = ${units/p.umv} UMV ✓`;
+  const bajo = Math.floor(units/p.umv)*p.umv;
+  const alto = bajo + p.umv;
+  return `No es múltiplo de ${p.umv}. Válido: ${bajo>0?bajo+" o ":""}${alto} u.`;
+}
+function cssEsc(s){ return String(s).replace(/["\\]/g,"\\$&"); }
+/* actualiza SOLO una fila, sin volver a dibujar la lista (así no se pierden los toques) */
+function refrescarFila(code){
+  const p = PRODUCTOS.find(x=>x.codigo===code);
+  if(!p) return;
+  const row = $(`#lista .prod[data-row="${cssEsc(code)}"]`);
+  if(!row) return;
+  const u = estado.cant[code] || 0;
+  const valido = u>0 && u % p.umv === 0;
+  row.classList.toggle("active", valido);
+  const h = row.querySelector(".units");
+  if(h){ h.textContent = textoHint(p, u); h.className = "units " + (u>0 ? (valido?"ok":"bad") : ""); }
+  const inp = row.querySelector("input.qty");
+  if(inp) inp.classList.toggle("bad", u>0 && !valido);
 }
 
 function lineasPedido(){
@@ -572,16 +631,26 @@ function lineasPedido(){
     unidades:estado.cant[p.codigo], packs:estado.cant[p.codigo]/p.umv
   }));
 }
-function hayInvalidos(){
-  return PRODUCTOS.some(p=>{ const u=estado.cant[p.codigo]||0; return u>0 && u % p.umv !== 0; });
+function contarInvalidos(){
+  return PRODUCTOS.filter(p=>{ const u=estado.cant[p.codigo]||0; return u>0 && u % p.umv !== 0; }).length;
 }
+function hayInvalidos(){ return contarInvalidos()>0; }
 function pintarResumen(){
   const l = lineasPedido();
   const totU = l.reduce((s,x)=>s+x.unidades,0);
-  $("#resumenLinea").textContent = `${l.length} productos · ${totU} unidades`;
+  $("#resumenLinea").textContent = `${l.length} prod. · ${totU} u.`;
+  const inv = contarInvalidos();
+  $("#avisoInv").textContent = inv ? `⚠ ${inv} sin múltiplo de UMV` : "";
   const hay = l.length>0;
   $("#btnDescargar").disabled = !hay;
   $("#btnVer").disabled = !hay;
+}
+/* vaciar el pedido (para arrancar con otro cliente) */
+function vaciarPedido(){
+  estado = {cliente:"", comentarios:"", cant:{}}; guardar();
+  $("#cliente").value = ""; $("#comentarios").value = "";
+  $("#buscar").value = "";
+  pintarZona(); pintarLista(); pintarResumen(); cerrarModal();
 }
 
 /* ====== MODAL ====== */
@@ -589,14 +658,17 @@ function abrirModal(){
   const l = lineasPedido();
   let html = "";
   if(!estado.cliente){ html += `<div class="warn">Falta seleccionar el cliente.</div>`; }
-  if(hayInvalidos()){ html += `<div class="warn">Hay artículos con cantidad que no es múltiplo de la UMV. No se incluyen en el pedido hasta corregirlos.</div>`; }
-  html += `<div class="meta">Cliente: <b>${estado.cliente||"—"}</b> · Zona: <b>${zonaDe(estado.cliente)||"—"}</b></div>`;
-  if((estado.comentarios||"").trim()){ html += `<div class="meta">Comentarios: <b>${estado.comentarios.replace(/</g,"&lt;")}</b></div>`; }
+  const inv = contarInvalidos();
+  if(inv){ html += `<div class="warn">Hay ${inv} artículo(s) con cantidad que no es múltiplo de la UMV. No se incluyen en el pedido hasta corregirlos.</div>`; }
+  html += `<div class="meta">Cliente: <b>${escH(estado.cliente||"—")}</b> · Zona: <b>${escH(zonaDe(estado.cliente)||"—")}</b></div>`;
+  if((estado.comentarios||"").trim()){ html += `<div class="meta">Comentarios: <b>${escH(estado.comentarios)}</b></div>`; }
+  const totU = l.reduce((s,x)=>s+x.unidades,0), totP = l.reduce((s,x)=>s+x.packs,0);
   html += l.map(x=>`
     <div class="line">
-      <div class="l"><div class="code">${x.codigo}</div>${x.nombre}<br><span class="code">${x.packs} UMV × ${x.umv} u/bulto</span></div>
+      <div class="l"><div class="code">${escH(x.codigo)}</div>${escH(x.nombre)}<br><span class="code">${x.packs} UMV × ${x.umv} u/bulto</span></div>
       <div class="r">${x.unidades} u.</div>
     </div>`).join("");
+  if(l.length) html += `<div class="line"><div class="l"><b>TOTAL</b></div><div class="r">${totP} UMV · ${totU} u.</div></div>`;
   $("#modalBody").innerHTML = html || `<div class="empty">El pedido está vacío</div>`;
   $("#modal").classList.add("open");
 }
@@ -645,6 +717,7 @@ async function abrirScan(){
   $("#scanLog").innerHTML=""; scanCount=0;
   $("#scanMsg").textContent="Iniciando cámara…";
   scanRunning=true;
+  prepararAudio();   // iPhone: el audio solo se habilita dentro del toque del usuario
   const v=$("#scanVideo");
   if('BarcodeDetector' in window){
     try{
@@ -718,9 +791,18 @@ function logScan(msg, cls){
   $("#scanMsg").textContent = `Escaneados: ${scanCount} · seguí apuntando o tocá Listo`;
 }
 let audioCtx=null;
-function beep(ok){
+/* Se llama DENTRO del toque que abre el escáner: en iOS/Safari el AudioContext
+   creado fuera de un gesto del usuario queda suspendido y no suena nunca. */
+function prepararAudio(){
   try{
     audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+  }catch(e){}
+}
+function beep(ok){
+  try{
+    prepararAudio();
+    if(!audioCtx) return;
     const o=audioCtx.createOscillator(), g=audioCtx.createGain();
     o.frequency.value = ok?880:220; o.connect(g); g.connect(audioCtx.destination);
     g.gain.setValueAtTime(0.15, audioCtx.currentTime);
@@ -850,19 +932,11 @@ function descargar(){
   rows.push([S(""),S(""),S(""),S(""),S(""),S("TOTAL"),S(""),N(totP),N(totU)]);
 
   const blob=construirXLSX(rows);
-  const safe=s=>s.replace(/[^\wáéíóúñ ]+/gi,"").replace(/\s+/g,"_");
-  const nombreArch=`pedido_${safe(cli)}_${fecha.toISOString().slice(0,10)}.xlsx`;
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url; a.download=nombreArch;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  const fArch=`${fecha.getFullYear()}-${p2(fecha.getMonth()+1)}-${p2(fecha.getDate())}`;
+  const nombreArch=`pedido_${nombreArchivoSeguro(cli)}_${fArch}.xlsx`;
+  descargarBlob(blob, nombreArch);
 
-  if(confirm("Pedido descargado.\n\n¿Vaciar el pedido para empezar uno nuevo?")){
-    estado = {cliente:"", comentarios:"", cant:{}}; guardar();
-    $("#cliente").value = ""; $("#comentarios").value = "";
-    pintarZona(); pintarLista(); pintarResumen(); cerrarModal();
-  }
+  if(confirm("Pedido descargado.\n\n¿Vaciar el pedido para empezar uno nuevo?")) vaciarPedido();
 }
 
 /* ====== CATÁLOGO EXTERNO (todos los celulares) ====== */
@@ -1004,14 +1078,14 @@ function exportarProductosExcel(){
   const rows=[["Código","Producto","UMV","EAN"].map(S)];
   PRODUCTOS.forEach(p=>rows.push([S(String(p.codigo)), S(p.nombre), N(p.umv), S(p.ean||"")]));
   const blob=construirXLSX(rows);
-  descargarBlob(blob, `productos_actuales_${new Date().toISOString().slice(0,10)}.xlsx`);
+  descargarBlob(blob, `productos_actuales_${hoyLocal()}.xlsx`);
 }
 function exportarClientesExcel(){
   const S=v=>({t:"s",v});
   const rows=[["Nombre","Zona"].map(S)];
   CLIENTES.forEach(c=>rows.push([S(c.nombre), S(c.zona||"")]));
   const blob=construirXLSX(rows);
-  descargarBlob(blob, `clientes_actuales_${new Date().toISOString().slice(0,10)}.xlsx`);
+  descargarBlob(blob, `clientes_actuales_${hoyLocal()}.xlsx`);
 }
 function descargarBlob(blob, nombre){
   const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=nombre;
@@ -1078,6 +1152,9 @@ $("#btnVer").addEventListener("click", abrirModal);
 $("#btnDescargar").addEventListener("click", descargar);
 $("#btnDescargar2").addEventListener("click", descargar);
 $("#btnCerrar").addEventListener("click", cerrarModal);
+$("#btnVaciar").addEventListener("click", ()=>{
+  if(confirm("¿Vaciar el pedido (cliente, comentarios y cantidades) para arrancar uno nuevo?")) vaciarPedido();
+});
 $("#modal").addEventListener("click", e=>{ if(e.target.id==="modal") cerrarModal(); });
 $("#btnScan").addEventListener("click", abrirScan);
 $("#btnScanCerrar").addEventListener("click", cerrarScan);
