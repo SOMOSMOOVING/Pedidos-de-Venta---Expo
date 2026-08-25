@@ -50,7 +50,8 @@
     background:#f3edff; color:var(--brand-dark); border:1px solid var(--line);
     font-size:12px; font-weight:700; padding:6px 11px; border-radius:20px;
   }
-  #hdrUser{font-weight:700; color:var(--brand-dark) !important;}
+  #hdrUser{font-weight:700; color:var(--brand-dark) !important;
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;}
   #hdrUser:empty{display:none;}
   /* Historial */
   .hst{border:1px solid var(--line); border-radius:12px; padding:11px 12px; margin-bottom:9px;}
@@ -105,7 +106,52 @@
     border-radius:10px; margin-bottom:10px; box-sizing:border-box;
   }
   .login-box .btn{width:100%; margin-top:4px;}
-  .login-error{color:var(--danger); font-size:13px; min-height:18px; margin-bottom:6px; font-weight:600;}
+  .login-error{color:var(--danger); font-size:13px; min-height:18px; margin-bottom:6px; font-weight:600; line-height:1.45;}
+  .btn-google{
+    width:100%; display:flex; align-items:center; justify-content:center; gap:10px;
+    background:#fff; color:#3c4043; border:1px solid #dadce0; border-radius:10px;
+    padding:13px 14px; font-size:15px; font-weight:700; font-family:inherit;
+    box-shadow:0 1px 2px rgba(60,64,67,.12);
+  }
+  .btn-google:active{background:#f7f8f8;}
+  .btn-google:disabled{opacity:.55;}
+  .login-hint{font-size:12px; color:var(--muted); margin:12px 0 10px; line-height:1.5;}
+  .login-hint b{color:var(--brand-dark);}
+  .login-spin{font-size:13px; color:var(--brand-dark); font-weight:700;}
+  .login-reintento{
+    margin-top:10px; background:none; border:none; color:var(--brand-dark);
+    font-size:13px; font-weight:700; text-decoration:underline; font-family:inherit;
+  }
+  /* estado de sincronización */
+  .sync-pill{
+    display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700;
+    padding:3px 8px; border-radius:20px; white-space:nowrap;
+  }
+  .sync-pill.ok{background:#e6f7ee; color:#0f7a45;}
+  .sync-pill.pend{background:#fff4e5; color:#b35309;}
+  .sync-pill.off{background:#eef1f5; color:#5b6472;}
+  #syncBar{
+    display:flex; align-items:center; gap:8px; padding:8px 12px; font-size:12px;
+    background:#fff4e5; color:#b35309; font-weight:700; border-bottom:1px solid var(--line);
+  }
+  #syncBar.oculto{display:none;}
+  #syncBar button{
+    margin-left:auto; background:#fff; border:1px solid #ffd8a8; color:#b35309;
+    font-size:11.5px; font-weight:700; padding:5px 10px; border-radius:8px; font-family:inherit;
+  }
+  /* panel admin */
+  .adm-tabs{display:flex; gap:7px; margin-bottom:12px;}
+  .adm-tabs button{
+    flex:1; font-size:13px; font-weight:700; padding:9px 6px; border-radius:9px;
+    border:1px solid var(--line); background:#f8f7fc; color:var(--muted); font-family:inherit;
+  }
+  .adm-tabs button.on{background:var(--brand); color:#fff; border-color:var(--brand);}
+  .srv-row{border:1px solid var(--line); border-radius:11px; padding:10px 12px; margin-bottom:8px;}
+  .srv-top{display:flex; justify-content:space-between; gap:8px; align-items:baseline;}
+  .srv-cli{font-size:13.5px; font-weight:700; line-height:1.25; min-width:0;}
+  .srv-tot{font-size:13.5px; font-weight:700; white-space:nowrap;}
+  .srv-meta{font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.4;}
+  .srv-vend{color:var(--brand-dark); font-weight:700;}
   .hdr-titles{border-left:1px solid var(--line); padding-left:12px; min-width:0;}
   .hdr-titles h1{margin:0; font-size:15px; font-weight:800; color:var(--ink); white-space:nowrap;}
   .hdr-titles p{margin:1px 0 0; font-size:10.5px; color:var(--muted); line-height:1.25;}
@@ -249,10 +295,18 @@
       <rect x="2" y="59" width="252" height="8" rx="4" fill="url(#mg2)"/>
     </svg>
     <div class="login-sub">Pedidos — Expo</div>
-    <input type="text" id="lgUser" placeholder="Tu usuario (ej. jsanchez)" autocomplete="username" autocapitalize="none">
-    <input type="password" id="lgPass" placeholder="Contraseña" autocomplete="current-password">
+    <button class="btn-google" id="lgGoogle">
+      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+        <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.5 24.5c0-1.6-.15-3.2-.44-4.7H24v9.1h12.6c-.55 2.9-2.2 5.4-4.7 7l7.7 6c4.5-4.2 6.9-10.3 6.9-17.4z"/>
+        <path fill="#FBBC05" d="M10.5 28.6a14.6 14.6 0 0 1 0-9.2l-7.9-6.2a24 24 0 0 0 0 21.6l7.9-6.2z"/>
+        <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.6-5.9l-7.7-6c-2.1 1.5-4.9 2.4-7.9 2.4-6.3 0-11.6-4.1-13.5-9.9l-7.9 6.2C6.5 42.6 14.6 48 24 48z"/>
+      </svg>
+      <span>Ingresar con Google</span>
+    </button>
+    <div class="login-hint">Entrá con tu cuenta<br><b>@moovingargentina.com.ar</b></div>
     <div id="lgError" class="login-error"></div>
-    <button class="btn" id="lgBtn">Ingresar</button>
+    <div id="lgSpin" class="login-spin" style="display:none">Verificando…</div>
   </div>
 </div>
 
@@ -280,6 +334,10 @@
     </div>
   </div>
   <div class="rainbow"></div>
+  <div id="syncBar" class="oculto">
+    <span id="syncTxt"></span>
+    <button id="syncBtn" type="button">Subir ahora</button>
+  </div>
 </header>
 
 <div class="wrap">
@@ -341,11 +399,34 @@
   </div>
 </div>
 
+<!-- Pedidos del servidor (solo admin) -->
+<div class="modal" id="srvModal">
+  <div class="sheet">
+    <h2>Pedidos de todo el equipo</h2>
+    <div class="body">
+      <div class="search" style="margin-bottom:12px">
+        <input type="text" id="srvFiltro" placeholder="Filtrar por cliente, vendedor o zona…" autocomplete="off">
+        <button class="btn ghost" id="btnSrvRecargar" title="Actualizar" style="min-width:0;padding:12px 14px">↻</button>
+      </div>
+      <div id="srvBody"></div>
+    </div>
+    <div class="foot">
+      <button class="btn ghost" id="btnSrvCerrar" style="flex:1">Cerrar</button>
+      <button class="btn" id="btnSrvExp" style="flex:1">⬇ Excel de todos</button>
+    </div>
+  </div>
+</div>
+
 <!-- Administración -->
 <div class="modal" id="admModal">
   <div class="sheet">
-    <h2>Administración del catálogo</h2>
+    <h2>Administración</h2>
     <div class="body">
+      <div class="adm-sec">
+        <h3>Pedidos de todos los vendedores</h3>
+        <p>Todo lo que cargó el equipo, en vivo desde el servidor. Se puede filtrar y bajar en un solo Excel.</p>
+        <button class="btn" id="btnVerTodos">Ver todos los pedidos</button>
+      </div>
       <div class="adm-sec">
         <h3>Productos</h3>
         <p>Descargá el catálogo actual para tenerlo de referencia o como base para editar en Excel.</p>
@@ -376,8 +457,8 @@
         <button class="btn" id="btnExpCli" disabled>Descargar clientes.json</button>
       </div>
       <div class="adm-help">
-        <b>Para que el cambio llegue a todos los celulares:</b> descargá el/los archivo(s) <b>.json</b> y subilos al repositorio de GitHub (botón <i>Add file → Upload files</i>, en la misma carpeta que el index.html), reemplazando los anteriores. GitHub Pages republica solo en 1-2 minutos y, al reabrir la app con internet, se actualiza sola.<br><br>
-        <b>Ojo:</b> los cambios que hacés acá valen solo en <u>este</u> celular hasta que subas el .json.
+        <b>Para que el cambio de catálogo llegue a todos los celulares:</b> descargá el/los archivo(s) <b>.json</b> y subilos al repositorio de GitHub (botón <i>Add file → Upload files</i>, en la misma carpeta que el index.html), reemplazando los anteriores. GitHub Pages republica solo en 1-2 minutos y, al reabrir la app con internet, se actualiza sola.<br><br>
+        <b>Ojo:</b> los cambios de catálogo que hacés acá valen solo en <u>este</u> celular hasta que subas el .json. Los <b>pedidos</b>, en cambio, van al servidor y los ves desde cualquier lado.
       </div>
     </div>
     <div class="foot"><button class="btn ghost" id="btnAdmCerrar" style="flex:1">Cerrar</button></div>
@@ -472,48 +553,220 @@ function nombreArchivoSeguro(s){
   return t || "SIN_CLIENTE";
 }
 
-/* ====== ACCESO ======
-   PROVISORIO hasta que entre el login real de Supabase: la contraseña es compartida
-   y el usuario sirve para identificar quién cargó cada pedido. "admin" ve el
-   panel de Administración; el resto, no. */
-const AUTH_PASS  = "mooving2026";
-const AUTH_ADMIN = "admin";
-const AUTH_KEY   = "pedidoExpoSesion";
+/* ==========================================================================
+   ACCESO CON GOOGLE (Supabase) — sin librerías, todo con fetch
+   --------------------------------------------------------------------------
+   Regla de oro: la app tiene que poder tomar pedidos SIEMPRE, incluso sin
+   señal y con el token vencido. El servidor sirve para sincronizar y para
+   la trazabilidad, nunca es requisito para trabajar.
+   ========================================================================== */
+const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
+const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
+
+const AUTH_KEY = "pedidoExpoSesionSB";
+const PKCE_KEY = "pedidoExpoPkce";
 let sesion = leerSesion();
+
 function leerSesion(){
-  try{ const s=JSON.parse(localStorage.getItem(AUTH_KEY)); return (s&&s.usuario)?s:null; }catch(e){ return null; }
+  try{ const s=JSON.parse(localStorage.getItem(AUTH_KEY)); return (s&&s.email)?s:null; }catch(e){ return null; }
+}
+function guardarSesion(s){
+  sesion=s;
+  try{ localStorage.setItem(AUTH_KEY, JSON.stringify(s)); }catch(e){}
 }
 function estaLogueado(){ return !!sesion; }
-function usuarioActual(){ return sesion ? sesion.usuario : ""; }
-function esAdmin(){ return !!sesion && sesion.rol==="admin"; }
+function usuarioActual(){ return sesion ? (sesion.nombre || sesion.email) : ""; }
+function emailActual(){ return sesion ? sesion.email : ""; }
+function esAdmin(){ return !!sesion && sesion.admin===true; }
 function mostrarApp(){
   $("#login").classList.add("hide");
   $("#btnAdmin").style.display = esAdmin() ? "" : "none";
   $("#hdrUser").textContent = usuarioActual();
 }
-function intentarLogin(){
-  const u = $("#lgUser").value.trim();
-  const p = $("#lgPass").value;
-  if(!u){ $("#lgError").textContent="Escribí tu nombre de usuario."; return; }
-  if(p!==AUTH_PASS){ $("#lgError").textContent="Contraseña incorrecta."; return; }
-  sesion = { usuario:u, rol: u.toLowerCase()===AUTH_ADMIN ? "admin" : "vendedor" };
-  try{ localStorage.setItem(AUTH_KEY, JSON.stringify(sesion)); }catch(e){}
-  $("#lgError").textContent=""; $("#lgPass").value="";
-  mostrarApp();
+function lgError(msg){ $("#lgError").innerHTML = msg || ""; }
+function lgCargando(on){
+  $("#lgSpin").style.display = on ? "" : "none";
+  $("#lgGoogle").disabled = !!on;
 }
-function cerrarSesion(){
-  if(!confirm("¿Cerrar sesión? El pedido que tengas cargado y el historial quedan guardados en este celular.")) return;
+
+/* ---------- PKCE a mano (crypto.subtle) ---------- */
+function b64url(bytes){
+  let s=""; for(const b of bytes) s+=String.fromCharCode(b);
+  return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function azar(n){ const a=new Uint8Array(n); crypto.getRandomValues(a); return b64url(a).slice(0,n); }
+async function retoPkce(verifier){
+  const h=await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return b64url(new Uint8Array(h));
+}
+/* URL de la app sin parámetros ni hash: es a donde Google/Supabase devuelven */
+function urlRetorno(){
+  return location.origin + location.pathname;
+}
+
+/* ---------- 1. arrancar el login ---------- */
+async function loginGoogle(){
+  lgError(""); lgCargando(true);
+  try{
+    const verifier = azar(64);
+    try{ localStorage.setItem(PKCE_KEY, verifier); }catch(e){}
+    const reto = await retoPkce(verifier);
+    const u = new URL(SB_URL + "/auth/v1/authorize");
+    u.searchParams.set("provider","google");
+    u.searchParams.set("redirect_to", urlRetorno());
+    u.searchParams.set("code_challenge", reto);
+    u.searchParams.set("code_challenge_method","s256");
+    location.href = u.toString();
+  }catch(e){
+    lgCargando(false);
+    lgError("No se pudo abrir el login de Google.<br>Revisá que tengas internet.");
+  }
+}
+
+/* ---------- 2. procesar la vuelta ---------- */
+/* Soporta las dos formas en que puede volver:
+   - PKCE:    ?code=...          (se canjea por token)
+   - implícito: #access_token=... (viene servido) */
+async function procesarRetorno(){
+  const q = new URLSearchParams(location.search);
+  const h = new URLSearchParams((location.hash||"").replace(/^#/,""));
+
+  const errDesc = q.get("error_description") || h.get("error_description");
+  if(errDesc){ limpiarURL(); lgError(escH(errDesc)); return false; }
+
+  if(h.get("access_token")){
+    const ok = await guardarDesdeTokens({
+      access_token:  h.get("access_token"),
+      refresh_token: h.get("refresh_token"),
+      expires_in:    parseInt(h.get("expires_in")||"3600",10)
+    });
+    limpiarURL();
+    return ok;
+  }
+  const code = q.get("code");
+  if(code){
+    lgCargando(true);
+    let verifier=""; try{ verifier=localStorage.getItem(PKCE_KEY)||""; }catch(e){}
+    try{
+      const r = await fetch(SB_URL+"/auth/v1/token?grant_type=pkce",{
+        method:"POST",
+        headers:{ "apikey":SB_KEY, "Content-Type":"application/json" },
+        body: JSON.stringify({ auth_code:code, code_verifier:verifier })
+      });
+      const d = await r.json();
+      limpiarURL();
+      if(!r.ok || !d.access_token){
+        lgCargando(false);
+        lgError("Google respondió pero no se pudo completar el ingreso.<br>"+escH(d.error_description||d.msg||d.error||"Probá de nuevo."));
+        return false;
+      }
+      try{ localStorage.removeItem(PKCE_KEY); }catch(e){}
+      return await guardarDesdeTokens(d);
+    }catch(e){
+      limpiarURL(); lgCargando(false);
+      lgError("Se cortó la conexión al validar el ingreso.<br>Probá de nuevo con señal.");
+      return false;
+    }
+  }
+  return false;
+}
+function limpiarURL(){
+  try{ history.replaceState({}, "", urlRetorno()); }catch(e){}
+}
+async function guardarDesdeTokens(d){
+  const u = d.user || await traerUsuario(d.access_token);
+  if(!u || !u.email){ lgCargando(false); lgError("No se pudo leer tu cuenta de Google."); return false; }
+  const meta = u.user_metadata || {};
+  guardarSesion({
+    email: u.email,
+    nombre: meta.full_name || meta.name || u.email.split("@")[0],
+    uid: u.id,
+    access_token: d.access_token,
+    refresh_token: d.refresh_token || "",
+    vence: Date.now() + (Number(d.expires_in||3600)*1000),
+    admin: false
+  });
+  await revisarSiEsAdmin();
+  lgCargando(false);
+  return true;
+}
+async function traerUsuario(token){
+  try{
+    const r=await fetch(SB_URL+"/auth/v1/user",{headers:{apikey:SB_KEY,Authorization:"Bearer "+token}});
+    return r.ok ? await r.json() : null;
+  }catch(e){ return null; }
+}
+
+/* ---------- 3. token válido (renueva si hace falta) ---------- */
+/* Devuelve null si no se puede renovar: la app sigue andando igual, solo
+   no sincroniza hasta que vuelva la señal. */
+async function tokenValido(){
+  if(!sesion) return null;
+  if(sesion.access_token && Date.now() < (sesion.vence||0) - 60000) return sesion.access_token;
+  if(!sesion.refresh_token) return null;
+  try{
+    const r=await fetch(SB_URL+"/auth/v1/token?grant_type=refresh_token",{
+      method:"POST", headers:{apikey:SB_KEY,"Content-Type":"application/json"},
+      body: JSON.stringify({refresh_token:sesion.refresh_token})
+    });
+    if(!r.ok) return null;
+    const d=await r.json();
+    if(!d.access_token) return null;
+    guardarSesion({...sesion,
+      access_token:d.access_token,
+      refresh_token:d.refresh_token||sesion.refresh_token,
+      vence: Date.now()+(Number(d.expires_in||3600)*1000)});
+    return d.access_token;
+  }catch(e){ return null; }
+}
+
+/* ---------- 4. ¿es admin? ----------
+   La política de RLS hace que la tabla admins devuelva filas SOLO a un admin.
+   Así no hace falta tener ningún mail escrito en el código. */
+async function revisarSiEsAdmin(){
+  const t=await tokenValido(); if(!t) return;
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/admins?select=email&limit=1",
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    if(!r.ok) return;
+    const d=await r.json();
+    const esA=Array.isArray(d) && d.length>0;
+    if(esA!==sesion.admin){ guardarSesion({...sesion, admin:esA}); }
+  }catch(e){}
+}
+
+/* ---------- 5. cerrar sesión ---------- */
+async function cerrarSesion(){
+  const pend=pendientes().length;
+  const aviso = pend
+    ? `Tenés ${pend} pedido(s) sin subir al servidor.\n\nSi cerrás sesión quedan guardados en este celular, pero conviene subirlos primero (con internet).\n\n¿Cerrar igual?`
+    : "¿Cerrar sesión? El pedido cargado y el historial quedan guardados en este celular.";
+  if(!confirm(aviso)) return;
+  const t=sesion&&sesion.access_token;
+  if(t){ try{ fetch(SB_URL+"/auth/v1/logout",{method:"POST",
+    headers:{apikey:SB_KEY,Authorization:"Bearer "+t}}); }catch(e){} }
   sesion=null;
   try{ localStorage.removeItem(AUTH_KEY); }catch(e){}
-  $("#lgUser").value=""; $("#lgPass").value=""; $("#lgError").textContent="";
+  lgError(""); lgCargando(false);
   $("#login").classList.remove("hide");
 }
-function initAuth(){
-  if(estaLogueado()) mostrarApp();
-  $("#lgBtn").addEventListener("click", intentarLogin);
-  $("#lgPass").addEventListener("keydown", e=>{ if(e.key==="Enter") intentarLogin(); });
-  $("#lgUser").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#lgPass").focus(); });
+
+async function initAuth(){
+  $("#lgGoogle").addEventListener("click", loginGoogle);
   $("#btnSalir").addEventListener("click", cerrarSesion);
+
+  // ¿venimos de Google?
+  if(location.search.includes("code=") || location.search.includes("error") || (location.hash||"").includes("access_token")){
+    const ok = await procesarRetorno();
+    if(ok){ mostrarApp(); return; }
+  }
+  if(estaLogueado()){
+    mostrarApp();
+    // en segundo plano: refrescar el token y el rol, sin bloquear nada
+    revisarSiEsAdmin().then(()=>{ $("#btnAdmin").style.display = esAdmin()?"":"none"; });
+  } else if(!navigator.onLine){
+    lgError("Estás sin internet.<br>El primer ingreso necesita conexión; después la app funciona offline.");
+  }
 }
 
 /* ====== HISTORIAL DE PEDIDOS (en este celular) ====== */
@@ -527,14 +780,104 @@ function guardarHistorial(h){
 }
 function guardarEnHistorial(ped){
   const h=historial();
+  ped.sync = "pendiente";
   h.unshift(ped);            // el más nuevo primero
   guardarHistorial(h);
   pintarHistorial();
+  sincronizar();             // intento inmediato, sin esperar
   return ped;
 }
 function borrarDelHistorial(id){
   guardarHistorial(historial().filter(p=>p.id!==id));
-  pintarHistorial();
+  pintarHistorial(); pintarSyncBar();
+}
+function marcarSync(id, estado){
+  const h=historial();
+  const p=h.find(x=>x.id===id);
+  if(!p) return;
+  p.sync=estado;
+  guardarHistorial(h);
+}
+function pendientes(){ return historial().filter(p=>p.sync!=="ok"); }
+
+/* ==========================================================================
+   SINCRONIZACIÓN CON EL SERVIDOR
+   --------------------------------------------------------------------------
+   El pedido se guarda primero en el celular y se sube después. Si no hay
+   señal queda en la cola y se reintenta solo: al abrir la app, cuando vuelve
+   la conexión, o tocando "Subir ahora".
+   La tabla tiene índice único (vendedor, pedido_ref), así que reintentar
+   nunca duplica.
+   ========================================================================== */
+let sincronizando=false;
+function filaServidor(ped){
+  return {
+    pedido_ref: ped.id,
+    vendedor_id: sesion.uid,
+    vendedor_email: sesion.email,
+    vendedor_nombre: sesion.nombre || "",
+    cliente: ped.cliente,
+    zona: ped.zona || "",
+    comentarios: ped.comentarios || "",
+    fecha: ped.fechaISO,
+    total_unidades: ped.totalUnidades,
+    total_umv: ped.totalUMV,
+    total_pesos: ped.totalPesos || 0,
+    lineas: ped.lineas
+  };
+}
+async function sincronizar(manual){
+  if(sincronizando) return;
+  const cola=pendientes();
+  if(cola.length===0){ pintarSyncBar(); return; }
+  if(!sesion){ pintarSyncBar(); return; }
+  if(!navigator.onLine){
+    if(manual) toast("Sin internet. Los pedidos quedan guardados acá.", true);
+    pintarSyncBar(); return;
+  }
+  sincronizando=true;
+  pintarSyncBar("subiendo");
+  const t=await tokenValido();
+  if(!t){
+    sincronizando=false; pintarSyncBar();
+    if(manual) toast("No se pudo validar la sesión. Probá de nuevo con señal.", true);
+    return;
+  }
+  let ok=0, fallo=0;
+  for(const ped of cola){
+    try{
+      const r=await fetch(SB_URL+"/rest/v1/pedidos?on_conflict=vendedor_id,pedido_ref",{
+        method:"POST",
+        headers:{
+          apikey:SB_KEY, Authorization:"Bearer "+t,
+          "Content-Type":"application/json",
+          Prefer:"resolution=merge-duplicates,return=minimal"
+        },
+        body: JSON.stringify(filaServidor(ped))
+      });
+      if(r.ok){ marcarSync(ped.id,"ok"); ok++; }
+      else{ fallo++; }
+    }catch(e){ fallo++; break; }   // se cortó la red: dejamos el resto para después
+  }
+  sincronizando=false;
+  pintarSyncBar(); pintarHistorial();
+  if(manual || ok){
+    if(ok && !fallo)      toast(`✓ ${ok} pedido(s) subido(s) al servidor`);
+    else if(ok && fallo)  toast(`${ok} subido(s), ${fallo} quedaron pendientes`, true);
+    else if(manual)       toast("No se pudo subir. Queda pendiente.", true);
+  }
+}
+function pintarSyncBar(estado){
+  const bar=$("#syncBar"); if(!bar) return;
+  const n=pendientes().length;
+  if(!sesion || n===0){ bar.classList.add("oculto"); return; }
+  bar.classList.remove("oculto");
+  const txt=$("#syncTxt"), btn=$("#syncBtn");
+  if(estado==="subiendo"){ txt.textContent=`Subiendo ${n} pedido(s)…`; btn.style.display="none"; return; }
+  txt.textContent = navigator.onLine
+    ? `${n} pedido(s) sin subir al servidor`
+    : `Sin internet · ${n} pedido(s) en espera`;
+  btn.style.display = navigator.onLine ? "" : "none";
 }
 
 function initClientes(){
@@ -1074,6 +1417,7 @@ function armarPedido(){
     cliente: estado.cliente || "SIN CLIENTE",
     zona: zonaDe(estado.cliente) || "",
     vendedor: usuarioActual(),
+    vendedorEmail: emailActual(),
     fechaISO: ahora.toISOString(),
     fecha: fechaHora(ahora),
     comentarios: (estado.comentarios||"").replace(/\r?\n/g," "),
@@ -1123,8 +1467,11 @@ function pintarHistorial(){
   const tU=h.reduce((s,p)=>s+p.totalUnidades,0);
   const tM=h.reduce((s,p)=>s+(p.totalPesos||0),0);
   const clientes=new Set(h.map(p=>p.cliente)).size;
+  const pend=h.filter(p=>p.sync!=="ok").length;
   cont.innerHTML =
-    `<div class="hst-sum">${h.length} pedido(s) · ${clientes} cliente(s) · ${tU} unidades${tM>0?` · $ ${fmtPrecio(tM)}`:""}</div>` +
+    `<div class="hst-sum">${h.length} pedido(s) · ${clientes} cliente(s) · ${tU} unidades${tM>0?` · $ ${fmtPrecio(tM)}`:""}` +
+    (pend?`<br><span style="color:#b35309">${pend} sin subir al servidor</span>`:
+          `<br><span style="color:#0f7a45">Todos subidos al servidor ✓</span>`)+`</div>` +
     h.map(p=>`
       <div class="hst">
         <div class="hst-top">
@@ -1135,11 +1482,14 @@ function pintarHistorial(){
           ${escH(p.zona||"sin zona")}<br>
           ${escH(p.fecha)} · ${escH(p.vendedor||"sin vendedor")} · ${p.lineas.length} producto(s)
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
+          <br><span class="sync-pill ${p.sync==="ok"?"ok":(navigator.onLine?"pend":"off")}">${
+            p.sync==="ok" ? "✓ en el servidor" : (navigator.onLine?"⟳ pendiente de subir":"⌂ solo en este celular")
+          }</span>
         </div>
         <div class="hst-acc">
           <button data-acc="xls" data-id="${escH(p.id)}">⬇ Excel</button>
           <button data-acc="dup" data-id="${escH(p.id)}">Reabrir</button>
-          <button class="del" data-acc="del" data-id="${escH(p.id)}">Borrar</button>
+          <button class="del" data-acc="del" data-id="${escH(p.id)}">Quitar</button>
         </div>
       </div>`).join("");
 }
@@ -1210,9 +1560,122 @@ function initHistorial(){
     if(acc==="xls") descargarPedidoGuardado(id);
     else if(acc==="dup") reabrirPedido(id);
     else if(acc==="del"){
-      const p=pedidoPorId(id);
-      if(p && confirm(`¿Borrar del historial el pedido de ${p.cliente}?\n\nNo se puede deshacer.`)) borrarDelHistorial(id);
+      const p=pedidoPorId(id); if(!p) return;
+      const av = p.sync==="ok"
+        ? `¿Quitar de este celular el pedido de ${p.cliente}?\n\nYa está en el servidor, así que el administrador lo sigue viendo. Solo desaparece de tu historial.`
+        : `¿Quitar el pedido de ${p.cliente}?\n\nOJO: todavía NO se subió al servidor. Si lo quitás, se pierde y nadie más lo va a ver.`;
+      if(confirm(av)) borrarDelHistorial(id);
     }
+  });
+  $("#syncBtn").addEventListener("click", ()=> sincronizar(true));
+  // reintentar cuando vuelve la señal
+  window.addEventListener("online",  ()=>{ pintarSyncBar(); sincronizar(); });
+  window.addEventListener("offline", ()=> pintarSyncBar());
+}
+
+/* ==========================================================================
+   PANEL DE ADMINISTRADOR: todos los pedidos de todos los vendedores
+   ========================================================================== */
+let SRV_PEDIDOS=[];
+async function traerPedidosServidor(){
+  const cont=$("#srvBody");
+  if(!navigator.onLine){ cont.innerHTML=`<div class="empty">Sin internet.<br>Esta pantalla lee del servidor, necesita conexión.</div>`; return; }
+  cont.innerHTML=`<div class="empty">Buscando pedidos…</div>`;
+  const t=await tokenValido();
+  if(!t){ cont.innerHTML=`<div class="empty">No se pudo validar la sesión.<br>Cerrá sesión y volvé a entrar.</div>`; return; }
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/pedidos?select=*&order=fecha.desc&limit=500",
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    if(!r.ok){ cont.innerHTML=`<div class="empty">El servidor respondió con un error (${r.status}).</div>`; return; }
+    SRV_PEDIDOS=await r.json();
+    pintarPedidosServidor();
+  }catch(e){
+    cont.innerHTML=`<div class="empty">Se cortó la conexión al buscar los pedidos.</div>`;
+  }
+}
+function pintarPedidosServidor(){
+  const cont=$("#srvBody");
+  const f=($("#srvFiltro").value||"").trim().toLowerCase();
+  let l=SRV_PEDIDOS;
+  if(f) l=l.filter(p=>
+    (p.cliente||"").toLowerCase().includes(f) ||
+    (p.vendedor_nombre||"").toLowerCase().includes(f) ||
+    (p.vendedor_email||"").toLowerCase().includes(f) ||
+    (p.zona||"").toLowerCase().includes(f));
+  if(SRV_PEDIDOS.length===0){
+    cont.innerHTML=`<div class="empty">Todavía no hay pedidos en el servidor.</div>`;
+    $("#btnSrvExp").disabled=true; return;
+  }
+  $("#btnSrvExp").disabled=false;
+  const tU=l.reduce((s,p)=>s+(p.total_unidades||0),0);
+  const tM=l.reduce((s,p)=>s+Number(p.total_pesos||0),0);
+  const vend=new Set(l.map(p=>p.vendedor_email)).size;
+  const cli=new Set(l.map(p=>p.cliente)).size;
+  cont.innerHTML =
+    `<div class="hst-sum">${l.length} pedido(s) · ${vend} vendedor(es) · ${cli} cliente(s) · ${tU} u.${tM>0?` · $ ${fmtPrecio(tM)}`:""}</div>`+
+    (l.length===0?`<div class="empty">Sin coincidencias.</div>`:
+    l.map(p=>{
+      const d=new Date(p.fecha);
+      const p2=n=>String(n).padStart(2,"0");
+      const f=isNaN(d)?"":`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+      return `<div class="srv-row">
+        <div class="srv-top">
+          <div class="srv-cli">${escH(p.cliente||"")}</div>
+          <div class="srv-tot">${p.total_unidades||0} u.${Number(p.total_pesos)>0?`<br>$ ${fmtPrecio(p.total_pesos)}`:""}</div>
+        </div>
+        <div class="srv-meta">
+          <span class="srv-vend">${escH(p.vendedor_nombre||p.vendedor_email||"")}</span> · ${escH(f)}<br>
+          ${escH(p.zona||"sin zona")} · ${(p.lineas||[]).length} producto(s)
+          ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
+        </div>
+      </div>`;
+    }).join(""));
+}
+/* Excel de todo lo que hay en el servidor, agrupado por cliente */
+function exportarServidor(){
+  if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
+  const grupos=new Map();
+  SRV_PEDIDOS.slice().reverse().forEach(p=>{
+    if(!grupos.has(p.cliente)) grupos.set(p.cliente,[]);
+    grupos.get(p.cliente).push(p);
+  });
+  const rows=[COLS_PEDIDO.map(CTB)];
+  let gU=0,gP=0,gM=0;
+  for(const [cliente,peds] of grupos){
+    let sU=0,sP=0,sM=0;
+    peds.forEach(p=>{
+      const d=new Date(p.fecha);
+      const f=isNaN(d)?String(p.fecha||""):fechaHora(d);
+      (p.lineas||[]).forEach(x=>{
+        rows.push([CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
+          CT(p.comentarios||""),CT(String(x.codigo||"")),CT(x.nombre||""),
+          CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
+          CM(Number(x.precio)||0),CM(Number(x.total)||0)]);
+      });
+      sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
+    });
+    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+               CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)]);
+    rows.push([]);
+    gU+=sU; gP+=sP; gM+=sM;
+  }
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
+             CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)]);
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${SRV_PEDIDOS.length} pedido(s) · ${grupos.size} cliente(s)`)]);
+  descargarBlob(construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
+    `pedidos_TODOS_${hoyLocal()}.xlsx`);
+}
+function initServidor(){
+  $("#btnSrvCerrar").addEventListener("click", ()=> $("#srvModal").classList.remove("open"));
+  $("#srvModal").addEventListener("click", e=>{ if(e.target.id==="srvModal") $("#srvModal").classList.remove("open"); });
+  $("#srvFiltro").addEventListener("input", pintarPedidosServidor);
+  $("#btnSrvRecargar").addEventListener("click", traerPedidosServidor);
+  $("#btnSrvExp").addEventListener("click", exportarServidor);
+  $("#btnVerTodos").addEventListener("click", ()=>{
+    $("#admModal").classList.remove("open");
+    $("#srvModal").classList.add("open");
+    traerPedidosServidor();
   });
 }
 
@@ -1423,9 +1886,10 @@ function initAdmin(){
 }
 
 /* ====== INIT ====== */
-initAuth();
 initAdmin();
 initHistorial();
+initServidor();
+initAuth().then(()=>{ pintarSyncBar(); sincronizar(); });
 $("#comentarios").value = estado.comentarios || "";
 $("#comentarios").addEventListener("input", ()=>{ estado.comentarios = $("#comentarios").value; guardar(); });
 $("#buscar").addEventListener("input", pintarLista);
