@@ -1,5 +1,5 @@
 /* Service Worker — Pedidos Mooving (PWA con actualización automática) */
-const CACHE = "pedidos-mooving-v5";
+const CACHE = "pedidos-mooving-v6";
 const SHELL = [
   "./",
   "./index.html",
