@@ -152,6 +152,19 @@
   .srv-tot{font-size:13.5px; font-weight:700; white-space:nowrap;}
   .srv-meta{font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.4;}
   .srv-vend{color:var(--brand-dark); font-weight:700;}
+  /* pantalla de estado */
+  .hst-estado{margin-top:14px; padding-top:12px; border-top:1px dashed var(--line);}
+  .hst-estado > button{background:none; border:none; color:var(--muted); font-size:12.5px;
+                       font-weight:700; font-family:inherit; text-decoration:underline; padding:4px 0;}
+  .estado{margin-top:10px; font-size:12.5px; line-height:1.7; background:#f8f7fc; border:1px solid var(--line);
+          border-radius:10px; padding:10px 12px;}
+  .estado .fila{display:flex; gap:8px; align-items:flex-start;}
+  .estado .fila b{flex:0 0 auto; color:var(--muted); font-weight:600; min-width:96px;}
+  .estado .fila span{flex:1; min-width:0; word-break:break-word;}
+  .estado .si{color:#0f7a45; font-weight:700;}
+  .estado .no{color:var(--danger); font-weight:700;}
+  .estado .arreglo{margin-top:9px; padding-top:9px; border-top:1px dashed var(--line);
+                   color:var(--danger); font-weight:700;}
   .hdr-titles{border-left:1px solid var(--line); padding-left:12px; min-width:0;}
   .hdr-titles h1{margin:0; font-size:15px; font-weight:800; color:var(--ink); white-space:nowrap;}
   .hdr-titles p{margin:1px 0 0; font-size:10.5px; color:var(--muted); line-height:1.25;}
@@ -391,7 +404,13 @@
 <div class="modal" id="histModal">
   <div class="sheet">
     <h2>Historial de pedidos</h2>
-    <div class="body" id="histBody"></div>
+    <div class="body">
+      <div id="histBody"></div>
+      <div class="hst-estado">
+        <button id="btnEstado" type="button">🔧 Estado de la app</button>
+        <div id="estadoBox" class="estado" style="display:none"></div>
+      </div>
+    </div>
     <div class="foot">
       <button class="btn ghost" id="btnHistCerrar" style="flex:1">Cerrar</button>
       <button class="btn" id="btnHistExp" style="flex:1">⬇ Excel de todo</button>
@@ -411,8 +430,11 @@
       <div id="srvBody"></div>
     </div>
     <div class="foot">
-      <button class="btn ghost" id="btnSrvCerrar" style="flex:1">Cerrar</button>
-      <button class="btn" id="btnSrvExp" style="flex:1">⬇ Excel de todos</button>
+      <button class="btn ghost" id="btnSrvCerrar" style="flex:1 1 0; min-width:0; padding:12px 6px">Cerrar</button>
+      <button class="btn ghost" id="btnSrvExp" style="flex:1 1 0; min-width:0; padding:12px 6px"
+              title="Todos los renglones de todos los pedidos">Detalle</button>
+      <button class="btn" id="btnSrvRes" style="flex:1 1 0; min-width:0; padding:12px 6px"
+              title="Un renglón por pedido">⬇ Resumen</button>
     </div>
   </div>
 </div>
@@ -560,6 +582,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
+const APP_VERSION = "v8";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -769,14 +792,84 @@ async function initAuth(){
   }
 }
 
-/* ====== HISTORIAL DE PEDIDOS (en este celular) ====== */
-const HIST_KEY = "pedidoExpoHistorial";
-function historial(){
-  try{ const h=JSON.parse(localStorage.getItem(HIST_KEY)); return Array.isArray(h)?h:[]; }catch(e){ return []; }
+/* ==========================================================================
+   HISTORIAL DE PEDIDOS (en este celular)
+   --------------------------------------------------------------------------
+   Va en IndexedDB, NO en localStorage. Un pedido de 550 artículos pesa unos
+   80 KB y localStorage tiene un techo de ~5 MB: a los 62 pedidos se llenaba y
+   el celular dejaba de guardar. IndexedDB no tiene ese techo.
+   Se mantiene una copia en memoria (HIST) para que el resto del código pueda
+   seguir leyendo el historial sin esperar al disco.
+   ========================================================================== */
+const HIST_KEY = "pedidoExpoHistorial";   // sólo se usa para migrar lo que haya quedado
+const IDB_NOMBRE = "pedidosMooving", IDB_TIENDA = "historial";
+let HIST = [];
+let idb = null;
+
+function abrirIDB(){
+  return new Promise((ok,fail)=>{
+    if(!("indexedDB" in window)) return fail(new Error("sin indexedDB"));
+    const req=indexedDB.open(IDB_NOMBRE,1);
+    req.onupgradeneeded=()=>{ const d=req.result;
+      if(!d.objectStoreNames.contains(IDB_TIENDA)) d.createObjectStore(IDB_TIENDA,{keyPath:"id"}); };
+    req.onsuccess=()=>ok(req.result);
+    req.onerror=()=>fail(req.error||new Error("no se pudo abrir indexedDB"));
+  });
 }
+function idbTodos(){
+  return new Promise((ok,fail)=>{
+    const tx=idb.transaction(IDB_TIENDA,"readonly");
+    const q=tx.objectStore(IDB_TIENDA).getAll();
+    q.onsuccess=()=>ok(q.result||[]); q.onerror=()=>fail(q.error);
+  });
+}
+function idbEscribir(lista, borrarIds){
+  return new Promise((ok,fail)=>{
+    const tx=idb.transaction(IDB_TIENDA,"readwrite");
+    const st=tx.objectStore(IDB_TIENDA);
+    (borrarIds||[]).forEach(id=>st.delete(id));
+    (lista||[]).forEach(p=>st.put(p));
+    tx.oncomplete=()=>ok(true);
+    tx.onerror=()=>fail(tx.error); tx.onabort=()=>fail(tx.error||new Error("abortado"));
+  });
+}
+async function iniciarHistorial(){
+  try{ idb = await abrirIDB(); }catch(e){ idb=null; }
+  if(idb){
+    try{
+      HIST = await idbTodos();
+      const viejo = localStorage.getItem(HIST_KEY);   // migración desde la versión anterior
+      if(viejo){
+        try{
+          const arr=JSON.parse(viejo);
+          if(Array.isArray(arr) && arr.length){
+            const conocidos=new Set(HIST.map(p=>p.id));
+            const nuevos=arr.filter(p=>p && p.id && !conocidos.has(p.id));
+            if(nuevos.length){ await idbEscribir(nuevos); HIST=HIST.concat(nuevos); }
+          }
+        }catch(e){}
+        try{ localStorage.removeItem(HIST_KEY); }catch(e){}
+      }
+    }catch(e){ HIST=[]; }
+  }else{
+    // respaldo para un navegador sin IndexedDB: se sigue usando localStorage
+    try{ const h=JSON.parse(localStorage.getItem(HIST_KEY)); HIST=Array.isArray(h)?h:[]; }catch(e){ HIST=[]; }
+  }
+  HIST.sort((a,b)=> String(b.fechaISO||"").localeCompare(String(a.fechaISO||"")));
+}
+function historial(){ return HIST; }
 function guardarHistorial(h){
-  try{ localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; }
-  catch(e){ toast("No se pudo guardar en el historial (memoria llena)", true); return false; }
+  const antes=new Set(HIST.map(p=>p.id));
+  const ahora=new Set(h.map(p=>p.id));
+  const borrar=[...antes].filter(id=>!ahora.has(id));
+  HIST=h;
+  if(idb){
+    idbEscribir(h, borrar).catch(()=>toast("No se pudo guardar el historial en este celular", true));
+  }else{
+    try{ localStorage.setItem(HIST_KEY, JSON.stringify(h)); }
+    catch(e){ toast("Memoria del celular llena: subí los pedidos y quitá los ya subidos", true); return false; }
+  }
+  return true;
 }
 function guardarEnHistorial(ped){
   const h=historial();
@@ -1309,35 +1402,56 @@ const CM  = v=>({t:"n",v:v,s:2});
 const CTB = v=>({t:"s",v:v,s:1});
 const CNB = v=>({t:"n",v:v,s:1});
 const CMB = v=>({t:"n",v:v,s:3});
-function crc32(bytes){
-  let c=~0>>>0;
-  for(let i=0;i<bytes.length;i++){
-    c^=bytes[i];
-    for(let k=0;k<8;k++) c=(c>>>1)^(0xEDB88320 & -(c&1));
-  }
-  return (~c)>>>0;
+/* tabla de CRC32, para poder calcularlo de a pedazos (streaming) */
+const CRC_TABLA=(()=>{ const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c>>>1)^(0xEDB88320 & -(c&1)); t[n]=c>>>0; }
+  return t; })();
+function crc32Parcial(c, bytes){
+  for(let i=0;i<bytes.length;i++) c=CRC_TABLA[(c^bytes[i])&0xFF]^(c>>>8);
+  return c>>>0;
 }
-function zipStore(files){
+function crc32(bytes){ return (~crc32Parcial(~0>>>0, bytes))>>>0; }
+/* Comprime con deflate si el navegador puede. Si no, guarda tal cual (método "store"),
+   que es como venía funcionando. Sin compresión, un Excel de 50.000 renglones pesa
+   40 MB; comprimido baja a un par de MB, que es la diferencia entre poder mandarlo
+   por mail desde el celular y no poder. */
+async function deflateRaw(bytes){
+  if(typeof CompressionStream === "undefined") return null;
+  try{
+    const st=new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(st).arrayBuffer());
+  }catch(e){ return null; }
+}
+async function zipStore(files){
   const enc=new TextEncoder();
   const parts=[]; const central=[]; let offset=0;
   for(const f of files){
     const nameB=enc.encode(f.name);
-    const data=f.bytes;
-    const crc=crc32(data), size=data.length;
+    let crc, size, csize, metodo, piezas;
+    if(f.pre){
+      // entrada que ya viene comprimida desde el generador por pedazos
+      crc=f.pre.crc; size=f.pre.size; csize=f.pre.csize; metodo=8; piezas=f.pre.trozos;
+    }else{
+      const data=f.bytes;
+      crc=crc32(data); size=data.length;
+      let comp=await deflateRaw(data); metodo=8;
+      if(!comp || comp.length>=size){ comp=data; metodo=0; }   // si no ayuda, sin comprimir
+      csize=comp.length; piezas=[comp];
+    }
     const lh=new DataView(new ArrayBuffer(30));
     lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0,true);
-    lh.setUint16(8,0,true); lh.setUint16(10,0,true); lh.setUint16(12,0,true);
-    lh.setUint32(14,crc,true); lh.setUint32(18,size,true); lh.setUint32(22,size,true);
+    lh.setUint16(8,metodo,true); lh.setUint16(10,0,true); lh.setUint16(12,0,true);
+    lh.setUint32(14,crc,true); lh.setUint32(18,csize,true); lh.setUint32(22,size,true);
     lh.setUint16(26,nameB.length,true); lh.setUint16(28,0,true);
-    parts.push(new Uint8Array(lh.buffer), nameB, data);
+    parts.push(new Uint8Array(lh.buffer), nameB, ...piezas);
     const ch=new DataView(new ArrayBuffer(46));
     ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
-    ch.setUint16(8,0,true); ch.setUint16(10,0,true); ch.setUint16(12,0,true); ch.setUint16(14,0,true);
-    ch.setUint32(16,crc,true); ch.setUint32(20,size,true); ch.setUint32(24,size,true);
+    ch.setUint16(8,0,true); ch.setUint16(10,metodo,true); ch.setUint16(12,0,true); ch.setUint16(14,0,true);
+    ch.setUint32(16,crc,true); ch.setUint32(20,csize,true); ch.setUint32(24,size,true);
     ch.setUint16(28,nameB.length,true); ch.setUint16(30,0,true); ch.setUint16(32,0,true);
     ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true); ch.setUint32(42,offset,true);
     central.push({h:new Uint8Array(ch.buffer), n:nameB});
-    offset+=30+nameB.length+size;
+    offset+=30+nameB.length+csize;
   }
   const cdParts=[]; let cdSize=0;
   for(const c of central){ cdParts.push(c.h,c.n); cdSize+=c.h.length+c.n.length; }
@@ -1348,53 +1462,144 @@ function zipStore(files){
   return new Blob([...parts, ...cdParts, new Uint8Array(eocd.buffer)],
     {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
 }
-function construirXLSX(rows, opts){
-  opts = opts || {};
-  const hoja = String(opts.hoja||"Pedido").replace(/[\[\]:*?\/\\]/g,"").slice(0,31) || "Hoja1";
+/* ==========================================================================
+   XLSX GRANDE (streaming)
+   --------------------------------------------------------------------------
+   Un Excel de 700.000 renglones no se puede armar como un texto entero:
+   serían cientos de MB en memoria y el navegador del celular se cae.
+   Acá el XML de la hoja se genera por pedazos y se va comprimiendo al vuelo,
+   así la memoria queda acotada al tamaño ya comprimido.
+   ========================================================================== */
+async function deflateStream(generarTextos){
+  const cs=new CompressionStream("deflate-raw");
+  const writer=cs.writable.getWriter();
+  const trozos=[]; let csize=0;
+  const leyendo=(async()=>{
+    const rd=cs.readable.getReader();
+    for(;;){ const {value,done}=await rd.read(); if(done) break; trozos.push(value); csize+=value.length; }
+  })();
   const enc=new TextEncoder();
-  const ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
-    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
-    '<Default Extension="xml" ContentType="application/xml"/>'+
-    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
-    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
-    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>';
-  const rels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
-    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
-  const wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
-    `<sheets><sheet name="${xmlEsc(hoja)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
-  const wbRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
-    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
-    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
-  /* estilos: 0=normal 1=negrita 2=plata 3=plata negrita */
-  const styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
-    '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>'+
-    '<fonts count="2">'+
-      '<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
-      '<font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
-    '</fonts>'+
-    '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'+
-    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'+
-    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
-    '<cellXfs count="4">'+
-      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
-      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
-      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'+
-      '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'+
-    '</cellXfs>'+
-    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
-    '</styleSheet>';
+  let crc=~0>>>0, size=0;
+  for await (const texto of generarTextos()){
+    const bytes=enc.encode(texto);
+    size+=bytes.length; crc=crc32Parcial(crc,bytes);
+    await writer.write(bytes);
+  }
+  await writer.close();
+  await leyendo;
+  return { crc:(~crc)>>>0, size, csize, trozos };
+}
+/* filasGen: función generadora que va entregando filas (arrays de celdas) */
+async function construirXLSXGrande(filasGen, opts){
+  opts=opts||{};
+  if(typeof CompressionStream === "undefined") throw new Error("Este navegador no puede armar archivos tan grandes. Probá desde una computadora.");
+  const hoja=String(opts.hoja||"Pedidos").replace(/[\[\]:*?\/\\]/g,"").slice(0,31)||"Hoja1";
+  const anchos=opts.anchos;
+  const CHUNK=4000;   // filas por pedazo antes de mandar a comprimir
+  let nFilas=0;
+  const hojaStream = await deflateStream(async function*(){
+    let buf='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    if(anchos && anchos.length){
+      buf+="<cols>";
+      anchos.forEach((w,i)=>{ buf+=`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`; });
+      buf+="</cols>";
+    }
+    buf+="<sheetData>";
+    let ri=0, desde=0;
+    for(const row of filasGen()){
+      ri++;
+      buf+=filaXML(row, ri);
+      if(ri-desde>=CHUNK){ yield buf; buf=""; desde=ri; if(opts.avance) opts.avance(ri); }
+    }
+    nFilas=ri;
+    buf+="</sheetData></worksheet>";
+    yield buf;
+  });
+  return armarZipMixto(hojaStream, hoja, nFilas);
+}
+/* arma el .xlsx cuando la hoja ya viene comprimida por pedazos */
+async function armarZipMixto(hojaStream, nombreHoja){
+  const enc=new TextEncoder();
+  const p=piezasFijasXLSX(nombreHoja);
+  return await zipStore([
+    {name:"[Content_Types].xml", bytes:enc.encode(p.ct)},
+    {name:"_rels/.rels", bytes:enc.encode(p.rels)},
+    {name:"xl/workbook.xml", bytes:enc.encode(p.wb)},
+    {name:"xl/_rels/workbook.xml.rels", bytes:enc.encode(p.wbRels)},
+    {name:"xl/styles.xml", bytes:enc.encode(p.styles)},
+    {name:"xl/worksheets/sheet1.xml", pre:hojaStream}
+  ]);
+}
+function filaXML(row, ri){
+  let out=`<row r="${ri}">`;
+  for(let ci=0; ci<row.length; ci++){
+    const cell=row[ci];
+    const ref=colName(ci+1)+ri;
+    const st=(cell&&cell.s)?` s="${cell.s}"`:"";
+    if(cell && cell.t==="n" && cell.v!=="" && cell.v!=null) out+=`<c r="${ref}"${st}><v>${cell.v}</v></c>`;
+    else{
+      const v=cell?cell.v:"";
+      if(v==="" || v==null) out+=`<c r="${ref}"${st}/>`;
+      else out+=`<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
+    }
+  }
+  return out+"</row>";
+}
+
+/* las 5 piezas fijas de un .xlsx (todo lo que no es la hoja de datos) */
+function piezasFijasXLSX(nombreHoja){
+  const hoja = String(nombreHoja||"Pedido").replace(/[\[\]:*?\/\\]/g,"").slice(0,31) || "Hoja1";
+  return {
+    ct:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+      '<Default Extension="xml" ContentType="application/xml"/>'+
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    rels:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    wb:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+      `<sheets><sheet name="${xmlEsc(hoja)}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    wbRels:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+    /* estilos: 0=normal 1=negrita 2=plata 3=plata negrita */
+    styles:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+      '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>'+
+      '<fonts count="2">'+
+        '<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
+        '<font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
+      '</fonts>'+
+      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'+
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'+
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+      '<cellXfs count="4">'+
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+        '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
+        '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'+
+        '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'+
+      '</cellXfs>'+
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
+      '</styleSheet>'
+  };
+}
+async function construirXLSX(rows, opts){
+  opts = opts || {};
+  const enc=new TextEncoder();
+  const p=piezasFijasXLSX(opts.hoja);
   const sheet=sheetXML(rows, opts.anchos);
-  return zipStore([
-    {name:"[Content_Types].xml", bytes:enc.encode(ct)},
-    {name:"_rels/.rels", bytes:enc.encode(rels)},
-    {name:"xl/workbook.xml", bytes:enc.encode(wb)},
-    {name:"xl/_rels/workbook.xml.rels", bytes:enc.encode(wbRels)},
-    {name:"xl/styles.xml", bytes:enc.encode(styles)},
+  return await zipStore([
+    {name:"[Content_Types].xml", bytes:enc.encode(p.ct)},
+    {name:"_rels/.rels", bytes:enc.encode(p.rels)},
+    {name:"xl/workbook.xml", bytes:enc.encode(p.wb)},
+    {name:"xl/_rels/workbook.xml.rels", bytes:enc.encode(p.wbRels)},
+    {name:"xl/styles.xml", bytes:enc.encode(p.styles)},
     {name:"xl/worksheets/sheet1.xml", bytes:enc.encode(sheet)}
   ]);
 }
@@ -1435,7 +1640,7 @@ function filasDePedido(ped){
     CM(x.precio), CM(x.total)
   ]);
 }
-function descargar(){
+async function descargar(){
   const l = lineasPedido();
   if(l.length===0){ alert("El pedido está vacío."); return; }
   if(!estado.cliente){ if(!confirm("No seleccionaste cliente. ¿Descargar igual?")) return; }
@@ -1447,7 +1652,7 @@ function descargar(){
   rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL"),
              CT(""),CNB(ped.totalUMV),CNB(ped.totalUnidades),CT(""),CMB(ped.totalPesos)]);
 
-  const blob=construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO});
+  const blob=await construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO});
   descargarBlob(blob, `pedido_${nombreArchivoSeguro(ped.cliente)}_${hoyLocal()}.xlsx`);
 
   guardarEnHistorial(ped);
@@ -1495,13 +1700,13 @@ function pintarHistorial(){
 }
 function pedidoPorId(id){ return historial().find(p=>p.id===id); }
 /* vuelve a bajar el Excel de un pedido ya guardado */
-function descargarPedidoGuardado(id){
+async function descargarPedidoGuardado(id){
   const ped=pedidoPorId(id); if(!ped) return;
   const rows=[COLS_PEDIDO.map(CTB)];
   filasDePedido(ped).forEach(r=>rows.push(r));
   rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL"),
              CT(""),CNB(ped.totalUMV),CNB(ped.totalUnidades),CT(""),CMB(ped.totalPesos)]);
-  descargarBlob(construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO}),
+  descargarBlob(await construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO}),
     `pedido_${nombreArchivoSeguro(ped.cliente)}_${(ped.fechaISO||"").slice(0,10)}.xlsx`);
 }
 /* carga un pedido guardado de vuelta en la pantalla para seguir editándolo */
@@ -1520,7 +1725,7 @@ function reabrirPedido(id){
   toast(`Pedido de ${ped.cliente} reabierto`);
 }
 /* ====== EXCEL CONSOLIDADO: todos los pedidos agrupados por cliente ====== */
-function exportarConsolidado(){
+async function exportarConsolidado(){
   const h=historial();
   if(h.length===0){ alert("No hay pedidos en el historial."); return; }
   // agrupar por cliente, respetando el orden de aparición
@@ -1546,7 +1751,7 @@ function exportarConsolidado(){
              CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)]);
   rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
              CTB(`${h.length} pedido(s) · ${grupos.size} cliente(s)`)]);
-  descargarBlob(construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
+  descargarBlob(await construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
     `pedidos_consolidado_${nombreArchivoSeguro(usuarioActual()||"todos")}_${hoyLocal()}.xlsx`);
 }
 function initHistorial(){
@@ -1577,20 +1782,65 @@ function initHistorial(){
    PANEL DE ADMINISTRADOR: todos los pedidos de todos los vendedores
    ========================================================================== */
 let SRV_PEDIDOS=[];
+const PAGINA=500;           // pedidos por consulta
+const MAX_FILAS_VISTA=300;  // cuántos se dibujan (el resto se llega con el filtro)
+
+/* Trae TODOS los pedidos, paginando. Para la lista NO pedimos las líneas
+   (el campo más pesado): con 1300 pedidos eso es la diferencia entre
+   medio megabyte y diez. Las líneas se piden aparte, solo para el Excel. */
+const COLS_LISTA="id,pedido_ref,cliente,zona,vendedor_nombre,vendedor_email,fecha,"+
+                 "total_unidades,total_umv,total_pesos,comentarios,total_lineas";
+async function traerPaginado(select, aviso){
+  const t=await tokenValido();
+  if(!t){ const e=new Error("no se pudo validar la sesión"); e.sesion=true; throw e; }
+  const out=[];
+  for(let desde=0; ; desde+=PAGINA){
+    if(aviso) aviso(out.length);
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=${select}&order=fecha.desc`,{
+      headers:{ apikey:SB_KEY, Authorization:"Bearer "+t, Range:`${desde}-${desde+PAGINA-1}` }});
+    if(!r.ok && r.status!==206){
+      let detalle=""; try{ detalle=(await r.text()).slice(0,300); }catch(x){}
+      const e=new Error(`el servidor respondió ${r.status}${detalle?" — "+detalle:""}`);
+      e.status=r.status; throw e;
+    }
+    const d=await r.json();
+    if(!Array.isArray(d) || d.length===0) break;
+    out.push(...d);
+    if(d.length<PAGINA) break;
+    if(out.length>=20000) break;   // freno de seguridad
+  }
+  return out;
+}
+/* Trae la lista tolerando que la base sea de una versión anterior: si todavía
+   no está la columna total_lineas, reintenta pidiendo todo. Así el panel
+   funciona igual si la migración no se corrió. */
+let SRV_MODO="";
+async function traerListaPedidos(aviso){
+  try{
+    const l=await traerPaginado(COLS_LISTA, aviso);
+    SRV_MODO="liviano"; return l;
+  }catch(e){
+    if(e.sesion) throw e;
+    const faltaColumna = e.status===400 || /total_lineas|column|does not exist/i.test(e.message||"");
+    if(!faltaColumna) throw e;
+    const l=await traerPaginado("*", aviso);     // respaldo sin la columna nueva
+    SRV_MODO="completo"; return l;
+  }
+}
 async function traerPedidosServidor(){
   const cont=$("#srvBody");
   if(!navigator.onLine){ cont.innerHTML=`<div class="empty">Sin internet.<br>Esta pantalla lee del servidor, necesita conexión.</div>`; return; }
   cont.innerHTML=`<div class="empty">Buscando pedidos…</div>`;
-  const t=await tokenValido();
-  if(!t){ cont.innerHTML=`<div class="empty">No se pudo validar la sesión.<br>Cerrá sesión y volvé a entrar.</div>`; return; }
   try{
-    const r=await fetch(SB_URL+"/rest/v1/pedidos?select=*&order=fecha.desc&limit=500",
-      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
-    if(!r.ok){ cont.innerHTML=`<div class="empty">El servidor respondió con un error (${r.status}).</div>`; return; }
-    SRV_PEDIDOS=await r.json();
+    SRV_PEDIDOS = await traerListaPedidos(n=>{
+      if(n) cont.innerHTML=`<div class="empty">Buscando pedidos… ${n} hasta ahora</div>`;
+    });
     pintarPedidosServidor();
   }catch(e){
-    cont.innerHTML=`<div class="empty">Se cortó la conexión al buscar los pedidos.</div>`;
+    cont.innerHTML = e.sesion
+      ? `<div class="empty">No se pudo validar la sesión.<br>Cerrá sesión y volvé a entrar.</div>`
+      : `<div class="empty">No se pudieron traer los pedidos.<br><br>
+           <span style="color:#d9480f;font-weight:700">${escH(e.message)}</span></div>`;
   }
 }
 function pintarPedidosServidor(){
@@ -1604,17 +1854,23 @@ function pintarPedidosServidor(){
     (p.zona||"").toLowerCase().includes(f));
   if(SRV_PEDIDOS.length===0){
     cont.innerHTML=`<div class="empty">Todavía no hay pedidos en el servidor.</div>`;
-    $("#btnSrvExp").disabled=true; return;
+    $("#btnSrvExp").disabled=true; $("#btnSrvRes").disabled=true; return;
   }
-  $("#btnSrvExp").disabled=false;
+  $("#btnSrvExp").disabled=false; $("#btnSrvRes").disabled=false;
   const tU=l.reduce((s,p)=>s+(p.total_unidades||0),0);
   const tM=l.reduce((s,p)=>s+Number(p.total_pesos||0),0);
   const vend=new Set(l.map(p=>p.vendedor_email)).size;
   const cli=new Set(l.map(p=>p.cliente)).size;
+  // se dibujan como máximo MAX_FILAS_VISTA, pero los totales son de TODO lo filtrado
+  // y el aviso dice cuántos quedaron sin dibujar (nunca recortar en silencio)
+  const vista = l.slice(0, MAX_FILAS_VISTA);
+  const ocultos = l.length - vista.length;
   cont.innerHTML =
-    `<div class="hst-sum">${l.length} pedido(s) · ${vend} vendedor(es) · ${cli} cliente(s) · ${tU} u.${tM>0?` · $ ${fmtPrecio(tM)}`:""}</div>`+
+    `<div class="hst-sum">${l.length} pedido(s) · ${vend} vendedor(es) · ${cli} cliente(s) · ${tU} u.${tM>0?` · $ ${fmtPrecio(tM)}`:""}`+
+    (ocultos?`<br><span style="color:#b35309">Se muestran los ${vista.length} más nuevos. Usá el filtro para llegar a los otros ${ocultos}. El Excel baja todos.</span>`:"")+
+    `</div>`+
     (l.length===0?`<div class="empty">Sin coincidencias.</div>`:
-    l.map(p=>{
+    vista.map(p=>{
       const d=new Date(p.fecha);
       const p2=n=>String(n).padStart(2,"0");
       const f=isNaN(d)?"":`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
@@ -1625,53 +1881,192 @@ function pintarPedidosServidor(){
         </div>
         <div class="srv-meta">
           <span class="srv-vend">${escH(p.vendedor_nombre||p.vendedor_email||"")}</span> · ${escH(f)}<br>
-          ${escH(p.zona||"sin zona")} · ${(p.lineas||[]).length} producto(s)
+          ${escH(p.zona||"sin zona")} · ${p.total_lineas!=null?p.total_lineas:(p.lineas||[]).length} producto(s)
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
         </div>
       </div>`;
     }).join(""));
 }
 /* Excel de todo lo que hay en el servidor, agrupado por cliente */
-function exportarServidor(){
+/* ==========================================================================
+   EXCEL DEL ADMINISTRADOR
+   --------------------------------------------------------------------------
+   Con 1300 pedidos de 550 artículos son 715.000 renglones. Eso no se puede
+   armar como un texto entero (el navegador se cae), así que:
+     - los pedidos se bajan del servidor de a tandas
+     - las filas se van generando y comprimiendo al vuelo
+   El "Resumen" (un renglón por pedido) es lo que se usa día a día: son 1300
+   filas, sale al instante y se abre en cualquier máquina.
+   ========================================================================== */
+const COLS_RESUMEN=["Cliente","Zona","Vendedor","Fecha","Comentarios","Productos distintos",
+                    "Cantidad UMV","Unidades","Total"];
+const ANCHOS_RESUMEN=[38,22,20,17,30,18,13,11,15];
+
+async function exportarResumenServidor(){
   if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
-  const grupos=new Map();
-  SRV_PEDIDOS.slice().reverse().forEach(p=>{
-    if(!grupos.has(p.cliente)) grupos.set(p.cliente,[]);
-    grupos.get(p.cliente).push(p);
-  });
-  const rows=[COLS_PEDIDO.map(CTB)];
-  let gU=0,gP=0,gM=0;
-  for(const [cliente,peds] of grupos){
-    let sU=0,sP=0,sM=0;
-    peds.forEach(p=>{
+  const btn=$("#btnSrvRes"), orig=btn.textContent;
+  btn.disabled=true; btn.textContent="Armando…";
+  try{
+    // ya tenemos los totales en SRV_PEDIDOS: no hace falta pedir nada más
+    const l=SRV_PEDIDOS.slice().sort((a,b)=>
+      (a.cliente||"").localeCompare(b.cliente||"") || String(a.fecha).localeCompare(String(b.fecha)));
+    const rows=[COLS_RESUMEN.map(CTB)];
+    let gL=0,gP=0,gU=0,gM=0;
+    l.forEach(p=>{
       const d=new Date(p.fecha);
-      const f=isNaN(d)?String(p.fecha||""):fechaHora(d);
-      (p.lineas||[]).forEach(x=>{
-        rows.push([CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
-          CT(p.comentarios||""),CT(String(x.codigo||"")),CT(x.nombre||""),
-          CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
-          CM(Number(x.precio)||0),CM(Number(x.total)||0)]);
-      });
-      sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
+      rows.push([CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),
+        CT(isNaN(d)?String(p.fecha||""):fechaHora(d)),CT(p.comentarios||""),
+        CN(Number(p.total_lineas)||0),CN(Number(p.total_umv)||0),
+        CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0)]);
+      gL+=Number(p.total_lineas)||0; gP+=Number(p.total_umv)||0;
+      gU+=Number(p.total_unidades)||0; gM+=Number(p.total_pesos)||0;
     });
-    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
-               CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)]);
-    rows.push([]);
-    gU+=sU; gP+=sP; gM+=sM;
-  }
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
-             CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)]);
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
-             CTB(`${SRV_PEDIDOS.length} pedido(s) · ${grupos.size} cliente(s)`)]);
-  descargarBlob(construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
-    `pedidos_TODOS_${hoyLocal()}.xlsx`);
+    rows.push([CTB(`TOTAL — ${l.length} pedido(s)`),CT(""),CT(""),CT(""),CT(""),
+      CNB(gL),CNB(gP),CNB(gU),CMB(gM)]);
+    descargarBlob(await construirXLSX(rows,{hoja:"Resumen", anchos:ANCHOS_RESUMEN}),
+      `pedidos_resumen_${hoyLocal()}.xlsx`);
+    toast(`✓ Resumen de ${l.length} pedido(s)`);
+  }catch(e){ alert("No se pudo armar el resumen.\n\n"+e.message); }
+  btn.disabled=false; btn.textContent=orig;
 }
+
+async function exportarServidor(){
+  if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
+  const renglones=SRV_PEDIDOS.reduce((s,p)=>s+(Number(p.total_lineas)||0),0);
+  if(renglones>1048000){
+    alert(`Son ${renglones.toLocaleString("es-AR")} renglones y una hoja de Excel aguanta 1.048.576.\n\n`+
+          `Usá el filtro para bajarlo por vendedor o por zona, o bajá el Resumen.`);
+    return;
+  }
+  if(renglones>150000 && !confirm(`El detalle completo son ${renglones.toLocaleString("es-AR")} renglones.\n\n`+
+      `Va a tardar un rato y conviene hacerlo desde una computadora, no del celular.\n\n¿Seguir?`)) return;
+
+  const btn=$("#btnSrvExp"), orig=btn.textContent;
+  btn.disabled=true; btn.textContent="Bajando…";
+  let todos;
+  try{
+    todos = await traerPaginado("*", n=>{ btn.textContent = n? `Bajando… ${n}` : "Bajando…"; });
+  }catch(e){
+    btn.disabled=false; btn.textContent=orig;
+    alert("No se pudieron traer los detalles de los pedidos.\n\n"+e.message);
+    return;
+  }
+  btn.textContent="Armando Excel…";
+  await new Promise(r=>setTimeout(r,30));
+  try{
+    // agrupar por cliente, del más viejo al más nuevo dentro de cada uno
+    const grupos=new Map();
+    todos.slice().reverse().forEach(p=>{
+      if(!grupos.has(p.cliente)) grupos.set(p.cliente,[]);
+      grupos.get(p.cliente).push(p);
+    });
+    let gU=0,gP=0,gM=0, nRen=0;
+    const filas = function*(){
+      yield COLS_PEDIDO.map(CTB);
+      for(const [cliente,peds] of grupos){
+        let sU=0,sP=0,sM=0;
+        for(const p of peds){
+          const d=new Date(p.fecha);
+          const f=isNaN(d)?String(p.fecha||""):fechaHora(d);
+          for(const x of (p.lineas||[])){
+            nRen++;
+            yield [CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
+              CT(p.comentarios||""),CT(String(x.codigo||"")),CT(x.nombre||""),
+              CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
+              CM(Number(x.precio)||0),CM(Number(x.total)||0)];
+          }
+          sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
+        }
+        yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+               CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)];
+        yield [];
+        gU+=sU; gP+=sP; gM+=sM;
+      }
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
+             CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)];
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${todos.length} pedido(s) · ${grupos.size} cliente(s)`)];
+    };
+    const blob = await construirXLSXGrande(filas, {hoja:"Pedidos", anchos:ANCHOS_PEDIDO,
+      avance: n=>{ btn.textContent=`Armando… ${Math.round(n/1000)}k`; }});
+    descargarBlob(blob, `pedidos_detalle_${hoyLocal()}.xlsx`);
+    toast(`✓ ${todos.length} pedido(s) · ${nRen.toLocaleString("es-AR")} renglones`);
+  }catch(e){
+    alert("No se pudo armar el Excel de detalle.\n\n"+e.message+"\n\nProbá con el Resumen, o filtrá por vendedor.");
+  }
+  btn.disabled=false; btn.textContent=orig;
+}
+
+/* ==========================================================================
+   ESTADO DE LA APP
+   Chequea de una lo que puede fallar y dice qué hacer, así un problema no
+   depende de recordar qué versión se subió ni de leer código.
+   ========================================================================== */
+async function revisarEstado(){
+  const box=$("#estadoBox");
+  const fila=(k,v)=>`<div class="fila"><b>${k}</b><span>${v}</span></div>`;
+  const si=t=>`<span class="si">${t}</span>`, no=t=>`<span class="no">${t}</span>`;
+  box.innerHTML=`<div class="fila"><b>Revisando…</b><span></span></div>`;
+  const arreglos=[];
+  let html="";
+  html+=fila("Versión app", APP_VERSION);
+  html+=fila("Guardado local", idb ? si("IndexedDB") : no("localStorage (se llena a los ~60 pedidos)"));
+  html+=fila("Conexión", navigator.onLine ? si("con internet") : no("sin internet"));
+  html+=fila("Tu cuenta", escH(emailActual()||"—"));
+  html+=fila("Sos admin", esAdmin() ? si("sí") : no("no"));
+  if(!esAdmin()) arreglos.push("Tu mail no está en la tabla <b>admins</b> de Supabase, o está escrito distinto.");
+  html+=fila("En este celular", `${historial().length} pedido(s), ${pendientes().length} sin subir`);
+
+  if(!navigator.onLine){
+    box.innerHTML = html + `<div class="arreglo">Sin internet no se puede revisar el servidor.</div>`;
+    return;
+  }
+  const t=await tokenValido();
+  html+=fila("Sesión", t ? si("válida") : no("no se pudo renovar"));
+  if(!t){
+    box.innerHTML=html+`<div class="arreglo">Qué hacer:<br>Cerrá sesión y volvé a entrar con Google.</div>`;
+    return;
+  }
+  let colOK=false, errCol="";
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=total_lineas&limit=1`,
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    colOK=r.ok;
+    if(!r.ok) errCol=(await r.text()).slice(0,160);
+  }catch(e){ errCol=e.message; }
+  html+=fila("Migración v6", colOK ? si("corrida") : no("FALTA correr supabase-migracion-v6.sql"));
+  if(!colOK) arreglos.push("Corré <b>supabase-migracion-v6.sql</b> en Supabase → SQL Editor. Mientras no esté, el panel funciona igual pero más lento.");
+
+  let nSrv="—", errSrv="";
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=id&limit=2000`,
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t,Prefer:"count=exact"}});
+    if(r.ok){
+      const cr=r.headers.get("content-range")||"";          // si el navegador lo deja leer
+      if(cr.includes("/") && cr.split("/")[1]!=="*") nSrv=cr.split("/")[1];
+      else { const d=await r.json(); nSrv = Array.isArray(d) ? (d.length>=2000?"2000+":String(d.length)) : "?"; }
+    } else { errSrv=(await r.text()).slice(0,160); }
+  }catch(e){ errSrv=e.message; }
+  html+=fila("Pedidos que ves", errSrv? no(escH(errSrv)) : (nSrv==="0"? no("0") : si(nSrv)));
+  if(nSrv==="0" && !errSrv) arreglos.push("No hay pedidos subidos al servidor, o no te alcanzan los permisos de administrador.");
+
+  box.innerHTML = html + (arreglos.length
+    ? `<div class="arreglo">Qué hacer:<br>${arreglos.join("<br>")}</div>`
+    : `<div class="arreglo" style="color:#0f7a45">Todo en orden.</div>`);
+}
+
 function initServidor(){
+  $("#btnEstado").addEventListener("click", ()=>{
+    const b=$("#estadoBox");
+    if(b.style.display==="none"){ b.style.display=""; revisarEstado(); }
+    else b.style.display="none";
+  });
   $("#btnSrvCerrar").addEventListener("click", ()=> $("#srvModal").classList.remove("open"));
   $("#srvModal").addEventListener("click", e=>{ if(e.target.id==="srvModal") $("#srvModal").classList.remove("open"); });
   $("#srvFiltro").addEventListener("input", pintarPedidosServidor);
   $("#btnSrvRecargar").addEventListener("click", traerPedidosServidor);
   $("#btnSrvExp").addEventListener("click", exportarServidor);
+  $("#btnSrvRes").addEventListener("click", exportarResumenServidor);
   $("#btnVerTodos").addEventListener("click", ()=>{
     $("#admModal").classList.remove("open");
     $("#srvModal").classList.add("open");
@@ -1816,18 +2211,18 @@ async function importarClientes(file, modo){
   return {leidos,act,add,omit,total:CLIENTES.length,modo};
 }
 /* Exportar catálogo actual a Excel (base para editar) */
-function exportarProductosExcel(){
+async function exportarProductosExcel(){
   const S=v=>({t:"s",v}), N=v=>({t:"n",v});
   const rows=[["Código","Producto","UMV","EAN","Precio"].map(S)];
   PRODUCTOS.forEach(p=>rows.push([S(String(p.codigo)), S(p.nombre), N(p.umv), S(p.ean||""), N(precioDe(p))]));
-  const blob=construirXLSX(rows);
+  const blob=await construirXLSX(rows);
   descargarBlob(blob, `productos_actuales_${hoyLocal()}.xlsx`);
 }
-function exportarClientesExcel(){
+async function exportarClientesExcel(){
   const S=v=>({t:"s",v});
   const rows=[["Nombre","Zona"].map(S)];
   CLIENTES.forEach(c=>rows.push([S(c.nombre), S(c.zona||"")]));
-  const blob=construirXLSX(rows);
+  const blob=await construirXLSX(rows);
   descargarBlob(blob, `clientes_actuales_${hoyLocal()}.xlsx`);
 }
 function descargarBlob(blob, nombre){
@@ -1889,7 +2284,9 @@ function initAdmin(){
 initAdmin();
 initHistorial();
 initServidor();
-initAuth().then(()=>{ pintarSyncBar(); sincronizar(); });
+iniciarHistorial()
+  .then(()=> initAuth())
+  .then(()=>{ pintarHistorial(); pintarSyncBar(); sincronizar(); });
 $("#comentarios").value = estado.comentarios || "";
 $("#comentarios").addEventListener("input", ()=>{ estado.comentarios = $("#comentarios").value; guardar(); });
 $("#buscar").addEventListener("input", pintarLista);
