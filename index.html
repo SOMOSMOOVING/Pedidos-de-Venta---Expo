@@ -582,7 +582,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v8";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v9";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1633,12 +1633,50 @@ function armarPedido(){
   };
 }
 /* filas de un pedido (sin encabezado) */
+/* --- Filas de un pedido para los Excel CONSOLIDADOS (tabla plana de 12 columnas).
+   El comentario va SOLO en el primer renglón de cada pedido: repetirlo en los 550
+   renglones no aporta nada y ensucia la planilla. Los demás datos sí se repiten,
+   porque son los que se usan para ordenar y filtrar. --- */
 function filasDePedido(ped){
-  return ped.lineas.map(x=>[
-    CT(ped.cliente), CT(ped.zona), CT(ped.vendedor), CT(ped.fecha), CT(ped.comentarios),
+  return ped.lineas.map((x,i)=>[
+    CT(ped.cliente), CT(ped.zona), CT(ped.vendedor), CT(ped.fecha),
+    CT(i===0 ? (ped.comentarios||"") : ""),
     CT(String(x.codigo)), CT(x.nombre), CN(x.umv), CN(x.packs), CN(x.unidades),
     CM(x.precio), CM(x.total)
   ]);
+}
+
+/* ==========================================================================
+   EXCEL DE UN PEDIDO
+   --------------------------------------------------------------------------
+   Formato de nota de pedido: primero los datos de cabecera (cliente, zona,
+   vendedor, fecha y el comentario UNA sola vez) y después la lista de
+   artículos. El comentario ya no se repite en cada renglón.
+   ========================================================================== */
+const COLS_ITEM   = ["Código","Descripción","UMV (u/bulto)","Cantidad UMV","Unidades","Precio unit.","Total"];
+const ANCHOS_ITEM = [14,46,14,14,11,13,15];
+const FILA_ENCABEZADO_ITEMS = 8;   // en qué fila arranca la tabla (para el futuro importador)
+
+function filasPedidoUnico(ped){
+  const rows=[];
+  rows.push([CTB("PEDIDO")]);
+  rows.push([CTB("Cliente"),     CT(ped.cliente||"")]);
+  rows.push([CTB("Zona"),        CT(ped.zona||"")]);
+  rows.push([CTB("Vendedor"),    CT(ped.vendedor||"")]);
+  rows.push([CTB("Fecha"),       CT(ped.fecha||"")]);
+  rows.push([CTB("Comentarios"), CT(ped.comentarios||"")]);
+  rows.push([]);                                  // renglón en blanco
+  rows.push(COLS_ITEM.map(CTB));                  // encabezado de la tabla
+  ped.lineas.forEach(x=>{
+    rows.push([CT(String(x.codigo)), CT(x.nombre), CN(x.umv), CN(x.packs),
+               CN(x.unidades), CM(x.precio), CM(x.total)]);
+  });
+  rows.push([CTB("TOTAL"), CT(""), CT(""),
+             CNB(ped.totalUMV), CNB(ped.totalUnidades), CT(""), CMB(ped.totalPesos)]);
+  return rows;
+}
+async function excelDeUnPedido(ped){
+  return await construirXLSX(filasPedidoUnico(ped), {hoja:"Pedido", anchos:ANCHOS_ITEM});
 }
 async function descargar(){
   const l = lineasPedido();
@@ -1647,13 +1685,8 @@ async function descargar(){
   else if(!existeCliente(estado.cliente)){ if(!confirm("El cliente escrito no está en la lista (quedará sin zona). ¿Descargar igual?")) return; }
 
   const ped = armarPedido();
-  const rows=[COLS_PEDIDO.map(CTB)];
-  filasDePedido(ped).forEach(r=>rows.push(r));
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL"),
-             CT(""),CNB(ped.totalUMV),CNB(ped.totalUnidades),CT(""),CMB(ped.totalPesos)]);
-
-  const blob=await construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO});
-  descargarBlob(blob, `pedido_${nombreArchivoSeguro(ped.cliente)}_${hoyLocal()}.xlsx`);
+  descargarBlob(await excelDeUnPedido(ped),
+    `pedido_${nombreArchivoSeguro(ped.cliente)}_${hoyLocal()}.xlsx`);
 
   guardarEnHistorial(ped);
   if(confirm(`Pedido descargado y guardado en el historial (${historial().length} en total).\n\n¿Vaciar el pedido para empezar uno nuevo?`)) vaciarPedido();
@@ -1702,11 +1735,7 @@ function pedidoPorId(id){ return historial().find(p=>p.id===id); }
 /* vuelve a bajar el Excel de un pedido ya guardado */
 async function descargarPedidoGuardado(id){
   const ped=pedidoPorId(id); if(!ped) return;
-  const rows=[COLS_PEDIDO.map(CTB)];
-  filasDePedido(ped).forEach(r=>rows.push(r));
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL"),
-             CT(""),CNB(ped.totalUMV),CNB(ped.totalUnidades),CT(""),CMB(ped.totalPesos)]);
-  descargarBlob(await construirXLSX(rows,{hoja:"Pedido", anchos:ANCHOS_PEDIDO}),
+  descargarBlob(await excelDeUnPedido(ped),
     `pedido_${nombreArchivoSeguro(ped.cliente)}_${(ped.fechaISO||"").slice(0,10)}.xlsx`);
 }
 /* carga un pedido guardado de vuelta en la pantalla para seguir editándolo */
@@ -1968,12 +1997,14 @@ async function exportarServidor(){
         for(const p of peds){
           const d=new Date(p.fecha);
           const f=isNaN(d)?String(p.fecha||""):fechaHora(d);
+          let primera=true;
           for(const x of (p.lineas||[])){
             nRen++;
             yield [CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
-              CT(p.comentarios||""),CT(String(x.codigo||"")),CT(x.nombre||""),
+              CT(primera ? (p.comentarios||"") : ""),CT(String(x.codigo||"")),CT(x.nombre||""),
               CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
               CM(Number(x.precio)||0),CM(Number(x.total)||0)];
+            primera=false;
           }
           sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
         }
