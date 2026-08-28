@@ -55,6 +55,13 @@
   #hdrUser:empty{display:none;}
   /* Historial */
   .hst{border:1px solid var(--line); border-radius:12px; padding:11px 12px; margin-bottom:9px;}
+  .hst.anul{background:#fbf7f6; border-color:#f0d9d2;}
+  .hst.anul .hst-cli, .hst.anul .hst-tot{text-decoration:line-through; color:var(--muted);}
+  .tag-anul{display:inline-block; background:var(--danger); color:#fff; font-size:10px;
+            font-weight:800; padding:2px 6px; border-radius:5px; vertical-align:middle;
+            letter-spacing:.4px; text-decoration:none;}
+  .srv-row.anul{background:#fbf7f6; border-color:#f0d9d2;}
+  .srv-row.anul .srv-cli, .srv-row.anul .srv-tot{text-decoration:line-through; color:var(--muted);}
   .hst-top{display:flex; justify-content:space-between; gap:8px; align-items:baseline;}
   .hst-cli{font-size:14px; font-weight:700; line-height:1.25; min-width:0;}
   .hst-tot{font-size:14px; font-weight:700; white-space:nowrap;}
@@ -115,7 +122,10 @@
   }
   .btn-google:active{background:#f7f8f8;}
   .btn-google:disabled{opacity:.55;}
-  .login-hint{font-size:12px; color:var(--muted); margin:12px 0 10px; line-height:1.5;}
+  .login-hint{font-size:12px; color:var(--muted); margin:12px 0 4px; line-height:1.5;}
+  .login-sep{display:flex; align-items:center; gap:10px; margin:16px 0 12px;
+             font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px;}
+  .login-sep::before, .login-sep::after{content:""; flex:1; height:1px; background:var(--line);}
   .login-hint b{color:var(--brand-dark);}
   .login-spin{font-size:13px; color:var(--brand-dark); font-weight:700;}
   .login-reintento{
@@ -317,7 +327,14 @@
       </svg>
       <span>Ingresar con Google</span>
     </button>
-    <div class="login-hint">Entrá con tu cuenta<br><b>@moovingargentina.com.ar</b></div>
+    <div class="login-hint">Personal de Mooving, con la cuenta<br><b>@moovingargentina.com.ar</b></div>
+
+    <div class="login-sep"><span>o con mail y contraseña</span></div>
+    <input type="email" id="lgMail" placeholder="Tu mail" autocomplete="username"
+           autocapitalize="none" inputmode="email" spellcheck="false">
+    <input type="password" id="lgPass" placeholder="Contraseña" autocomplete="current-password">
+    <button class="btn" id="lgBtnMail">Ingresar</button>
+
     <div id="lgError" class="login-error"></div>
     <div id="lgSpin" class="login-spin" style="display:none">Verificando…</div>
   </div>
@@ -582,7 +599,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v9";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v11";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -646,6 +663,38 @@ async function loginGoogle(){
   }
 }
 
+/* ---------- 1b. login con mail y contraseña ----------
+   Para los vendedores externos, que no tienen cuenta de Google de la empresa.
+   Los usuarios se crean desde el panel de Supabase; acá solo se valida. */
+async function loginMail(){
+  const mail=($("#lgMail").value||"").trim().toLowerCase();
+  const pass=$("#lgPass").value||"";
+  if(!mail || !mail.includes("@")){ lgError("Escribí tu mail completo."); $("#lgMail").focus(); return; }
+  if(!pass){ lgError("Escribí tu contraseña."); $("#lgPass").focus(); return; }
+  lgError(""); lgCargando(true);
+  try{
+    const r=await fetch(SB_URL+"/auth/v1/token?grant_type=password",{
+      method:"POST",
+      headers:{ "apikey":SB_KEY, "Content-Type":"application/json" },
+      body: JSON.stringify({ email:mail, password:pass })
+    });
+    const d=await r.json();
+    if(!r.ok || !d.access_token){
+      lgCargando(false);
+      const msg=String(d.error_description||d.msg||d.error||"");
+      lgError(/invalid|credential|grant/i.test(msg)
+        ? "Mail o contraseña incorrectos."
+        : "No se pudo entrar.<br>"+escH(msg||"Probá de nuevo."));
+      return;
+    }
+    $("#lgPass").value="";
+    if(await guardarDesdeTokens(d)) mostrarApp();
+  }catch(e){
+    lgCargando(false);
+    lgError("Sin conexión.<br>El primer ingreso necesita internet.");
+  }
+}
+
 /* ---------- 2. procesar la vuelta ---------- */
 /* Soporta las dos formas en que puede volver:
    - PKCE:    ?code=...          (se canjea por token)
@@ -698,7 +747,7 @@ function limpiarURL(){
 }
 async function guardarDesdeTokens(d){
   const u = d.user || await traerUsuario(d.access_token);
-  if(!u || !u.email){ lgCargando(false); lgError("No se pudo leer tu cuenta de Google."); return false; }
+  if(!u || !u.email){ lgCargando(false); lgError("No se pudo leer tu cuenta."); return false; }
   const meta = u.user_metadata || {};
   guardarSesion({
     email: u.email,
@@ -710,8 +759,25 @@ async function guardarDesdeTokens(d){
     admin: false
   });
   await revisarSiEsAdmin();
+  await traerFichaVendedor();
   lgCargando(false);
   return true;
+}
+/* Busca nombre y zona en el padrón. Los que entran con mail y contraseña no
+   traen nombre de ningún lado: sin esto aparecerían como "lorenavta". */
+async function traerFichaVendedor(){
+  const t=await tokenValido(); if(!t || !sesion) return;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/vendedores?select=nombre,zona&email=eq.`+
+      encodeURIComponent(sesion.email.toLowerCase()),
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    if(!r.ok) return;                       // sin la migración v11 sigue igual
+    const d=await r.json();
+    if(Array.isArray(d) && d[0] && d[0].nombre){
+      guardarSesion({...sesion, nombre:d[0].nombre, zonaVendedor:d[0].zona||""});
+      $("#hdrUser").textContent = usuarioActual();
+    }
+  }catch(e){}
 }
 async function traerUsuario(token){
   try{
@@ -770,12 +836,17 @@ async function cerrarSesion(){
     headers:{apikey:SB_KEY,Authorization:"Bearer "+t}}); }catch(e){} }
   sesion=null;
   try{ localStorage.removeItem(AUTH_KEY); }catch(e){}
+  const m=$("#lgMail"), pw=$("#lgPass");
+  if(m) m.value=""; if(pw) pw.value="";
   lgError(""); lgCargando(false);
   $("#login").classList.remove("hide");
 }
 
 async function initAuth(){
   $("#lgGoogle").addEventListener("click", loginGoogle);
+  $("#lgBtnMail").addEventListener("click", loginMail);
+  $("#lgMail").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#lgPass").focus(); });
+  $("#lgPass").addEventListener("keydown", e=>{ if(e.key==="Enter") loginMail(); });
   $("#btnSalir").addEventListener("click", cerrarSesion);
 
   // ¿venimos de Google?
@@ -786,7 +857,8 @@ async function initAuth(){
   if(estaLogueado()){
     mostrarApp();
     // en segundo plano: refrescar el token y el rol, sin bloquear nada
-    revisarSiEsAdmin().then(()=>{ $("#btnAdmin").style.display = esAdmin()?"":"none"; });
+    revisarSiEsAdmin().then(()=>{ $("#btnAdmin").style.display = esAdmin()?"":"none"; })
+                      .then(()=> traerFichaVendedor());
   } else if(!navigator.onLine){
     lgError("Estás sin internet.<br>El primer ingreso necesita conexión; después la app funciona offline.");
   }
@@ -904,7 +976,7 @@ function pendientes(){ return historial().filter(p=>p.sync!=="ok"); }
    ========================================================================== */
 let sincronizando=false;
 function filaServidor(ped){
-  return {
+  const f = {
     pedido_ref: ped.id,
     vendedor_id: sesion.uid,
     vendedor_email: sesion.email,
@@ -918,6 +990,14 @@ function filaServidor(ped){
     total_pesos: ped.totalPesos || 0,
     lineas: ped.lineas
   };
+  // Solo se mandan si el pedido está anulado: así la app sigue sincronizando
+  // aunque la base todavía no tenga la migración v10.
+  if(ped.anulado){
+    f.anulado = true;
+    f.anulado_motivo = ped.anuladoMotivo || "";
+    if(ped.anuladoISO) f.anulado_en = ped.anuladoISO;
+  }
+  return f;
 }
 async function sincronizar(manual){
   if(sincronizando) return;
@@ -1605,10 +1685,14 @@ async function construirXLSX(rows, opts){
 }
 
 /* ====== PEDIDO -> EXCEL ====== */
-const COLS_PEDIDO = ["Cliente","Zona","Vendedor","Fecha","Comentarios","Código","Descripción",
+const COLS_PEDIDO = ["Estado","Cliente","Zona","Vendedor","Fecha","Comentarios","Código","Descripción",
                      "UMV (u/bulto)","Cantidad UMV","Unidades","Precio unit.","Total"];
-const ANCHOS_PEDIDO = [34,20,14,17,28,12,42,13,13,10,12,14];
+const ANCHOS_PEDIDO = [10,34,20,14,17,28,12,42,13,13,10,12,14];
 
+function fechaCortaISO(iso){
+  const d=new Date(iso||"");
+  return isNaN(d) ? "—" : fechaHora(d);
+}
 function fechaHora(d){
   const p2=n=>String(n).padStart(2,"0");
   return `${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
@@ -1639,6 +1723,7 @@ function armarPedido(){
    porque son los que se usan para ordenar y filtrar. --- */
 function filasDePedido(ped){
   return ped.lineas.map((x,i)=>[
+    CT(ped.anulado?"ANULADO":""),
     CT(ped.cliente), CT(ped.zona), CT(ped.vendedor), CT(ped.fecha),
     CT(i===0 ? (ped.comentarios||"") : ""),
     CT(String(x.codigo)), CT(x.nombre), CN(x.umv), CN(x.packs), CN(x.unidades),
@@ -1659,7 +1744,11 @@ const FILA_ENCABEZADO_ITEMS = 8;   // en qué fila arranca la tabla (para el fut
 
 function filasPedidoUnico(ped){
   const rows=[];
-  rows.push([CTB("PEDIDO")]);
+  rows.push([CTB(ped.anulado ? "PEDIDO ANULADO" : "PEDIDO")]);
+  if(ped.anulado){
+    rows.push([CTB("Anulado el"), CT(fechaCortaISO(ped.anuladoISO))]);
+    rows.push([CTB("Motivo"),     CT(ped.anuladoMotivo||"—")]);
+  }
   rows.push([CTB("Cliente"),     CT(ped.cliente||"")]);
   rows.push([CTB("Zona"),        CT(ped.zona||"")]);
   rows.push([CTB("Vendedor"),    CT(ped.vendedor||"")]);
@@ -1702,24 +1791,28 @@ function pintarHistorial(){
     return;
   }
   $("#btnHistExp").disabled=false;
-  const tU=h.reduce((s,p)=>s+p.totalUnidades,0);
-  const tM=h.reduce((s,p)=>s+(p.totalPesos||0),0);
-  const clientes=new Set(h.map(p=>p.cliente)).size;
+  const viv=h.filter(p=>!p.anulado);
+  const tU=viv.reduce((s,p)=>s+p.totalUnidades,0);
+  const tM=viv.reduce((s,p)=>s+(p.totalPesos||0),0);
+  const clientes=new Set(viv.map(p=>p.cliente)).size;
   const pend=h.filter(p=>p.sync!=="ok").length;
+  const nAnul=h.filter(p=>p.anulado).length;
   cont.innerHTML =
-    `<div class="hst-sum">${h.length} pedido(s) · ${clientes} cliente(s) · ${tU} unidades${tM>0?` · $ ${fmtPrecio(tM)}`:""}` +
+    `<div class="hst-sum">${viv.length} pedido(s) · ${clientes} cliente(s) · ${tU} unidades${tM>0?` · $ ${fmtPrecio(tM)}`:""}` +
+    (nAnul?`<br><span style="color:var(--muted)">+ ${nAnul} anulado(s), no cuentan en el total</span>`:"")+
     (pend?`<br><span style="color:#b35309">${pend} sin subir al servidor</span>`:
           `<br><span style="color:#0f7a45">Todos subidos al servidor ✓</span>`)+`</div>` +
     h.map(p=>`
-      <div class="hst">
+      <div class="hst ${p.anulado?"anul":""}">
         <div class="hst-top">
-          <div class="hst-cli">${escH(p.cliente)}</div>
+          <div class="hst-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${escH(p.cliente)}</div>
           <div class="hst-tot">${p.totalUnidades} u.${(p.totalPesos>0)?`<br>$ ${fmtPrecio(p.totalPesos)}`:""}</div>
         </div>
         <div class="hst-meta">
           ${escH(p.zona||"sin zona")}<br>
           ${escH(p.fecha)} · ${escH(p.vendedor||"sin vendedor")} · ${p.lineas.length} producto(s)
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
+          ${p.anulado?`<br><span style="color:var(--danger);font-weight:700">Anulado el ${escH(fechaCortaISO(p.anuladoISO))}${p.anuladoMotivo?` — “${escH(p.anuladoMotivo)}”`:""}</span>`:""}
           <br><span class="sync-pill ${p.sync==="ok"?"ok":(navigator.onLine?"pend":"off")}">${
             p.sync==="ok" ? "✓ en el servidor" : (navigator.onLine?"⟳ pendiente de subir":"⌂ solo en este celular")
           }</span>
@@ -1727,11 +1820,49 @@ function pintarHistorial(){
         <div class="hst-acc">
           <button data-acc="xls" data-id="${escH(p.id)}">⬇ Excel</button>
           <button data-acc="dup" data-id="${escH(p.id)}">Reabrir</button>
-          <button class="del" data-acc="del" data-id="${escH(p.id)}">Quitar</button>
+          ${p.anulado?"":`<button class="del" data-acc="anular" data-id="${escH(p.id)}">Anular</button>`}
         </div>
       </div>`).join("");
 }
 function pedidoPorId(id){ return historial().find(p=>p.id===id); }
+function anulados(){ return historial().filter(p=>p.anulado); }
+function vigentes(){ return historial().filter(p=>!p.anulado); }
+
+/* ==========================================================================
+   ANULAR UN PEDIDO
+   --------------------------------------------------------------------------
+   El pedido NO se borra: se marca como anulado y se sube así, para que el
+   administrador vea que existió y que se dio de baja, con fecha y motivo.
+   Si nunca llegó al servidor no hay nada que anular allá: se saca del celular.
+   ========================================================================== */
+async function anularPedido(id){
+  const ped=pedidoPorId(id); if(!ped) return;
+  if(ped.anulado){ toast("Ese pedido ya está anulado"); return; }
+
+  if(ped.sync!=="ok"){
+    if(!confirm(`El pedido de ${ped.cliente} nunca llegó al servidor.\n\n`+
+                `Si lo anulás ahora se descarta y nadie lo va a ver. ¿Seguir?`)) return;
+    guardarHistorial(historial().filter(x=>x.id!==id));
+    pintarHistorial(); pintarSyncBar();
+    toast("Pedido descartado");
+    return;
+  }
+
+  if(!confirm(`¿Anular el pedido de ${ped.cliente}?\n\n`+
+              `No se borra: queda registrado como anulado y el administrador lo ve así.`)) return;
+  let motivo="";
+  try{ motivo = prompt("Motivo de la anulación (opcional):","") || ""; }catch(e){}
+
+  const h=historial();
+  const t=h.find(x=>x.id===id);
+  t.anulado=true;
+  t.anuladoISO=new Date().toISOString();
+  t.anuladoMotivo=motivo.trim().slice(0,300);
+  t.sync="pendiente";                 // para que la cola lo suba
+  guardarHistorial(h);
+  pintarHistorial(); pintarSyncBar();
+  await sincronizar(true);
+}
 /* vuelve a bajar el Excel de un pedido ya guardado */
 async function descargarPedidoGuardado(id){
   const ped=pedidoPorId(id); if(!ped) return;
@@ -1757,6 +1888,7 @@ function reabrirPedido(id){
 async function exportarConsolidado(){
   const h=historial();
   if(h.length===0){ alert("No hay pedidos en el historial."); return; }
+  const nAnul=h.filter(p=>p.anulado).length;
   // agrupar por cliente, respetando el orden de aparición
   const grupos=new Map();
   h.slice().reverse().forEach(p=>{               // del más viejo al más nuevo
@@ -1769,17 +1901,18 @@ async function exportarConsolidado(){
     let sU=0, sP=0, sM=0;
     peds.forEach(ped=>{
       filasDePedido(ped).forEach(r=>rows.push(r));
+      if(ped.anulado) return;                     // los anulados no suman
       sU+=ped.totalUnidades; sP+=ped.totalUMV; sM+=(ped.totalPesos||0);
     });
-    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
                CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)]);
     rows.push([]);                                // fila en blanco entre clientes
     gU+=sU; gP+=sP; gM+=sM;
   }
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL (sin anulados)"),
              CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)]);
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
-             CTB(`${h.length} pedido(s) · ${grupos.size} cliente(s)`)]);
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${h.length-nAnul} pedido(s) · ${grupos.size} cliente(s)`+(nAnul?` · ${nAnul} anulado(s)`:""))]);
   descargarBlob(await construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
     `pedidos_consolidado_${nombreArchivoSeguro(usuarioActual()||"todos")}_${hoyLocal()}.xlsx`);
 }
@@ -1793,13 +1926,7 @@ function initHistorial(){
     const id=b.getAttribute("data-id"), acc=b.getAttribute("data-acc");
     if(acc==="xls") descargarPedidoGuardado(id);
     else if(acc==="dup") reabrirPedido(id);
-    else if(acc==="del"){
-      const p=pedidoPorId(id); if(!p) return;
-      const av = p.sync==="ok"
-        ? `¿Quitar de este celular el pedido de ${p.cliente}?\n\nYa está en el servidor, así que el administrador lo sigue viendo. Solo desaparece de tu historial.`
-        : `¿Quitar el pedido de ${p.cliente}?\n\nOJO: todavía NO se subió al servidor. Si lo quitás, se pierde y nadie más lo va a ver.`;
-      if(confirm(av)) borrarDelHistorial(id);
-    }
+    else if(acc==="anular") anularPedido(id);
   });
   $("#syncBtn").addEventListener("click", ()=> sincronizar(true));
   // reintentar cuando vuelve la señal
@@ -1818,7 +1945,8 @@ const MAX_FILAS_VISTA=300;  // cuántos se dibujan (el resto se llega con el fil
    (el campo más pesado): con 1300 pedidos eso es la diferencia entre
    medio megabyte y diez. Las líneas se piden aparte, solo para el Excel. */
 const COLS_LISTA="id,pedido_ref,cliente,zona,vendedor_nombre,vendedor_email,fecha,"+
-                 "total_unidades,total_umv,total_pesos,comentarios,total_lineas";
+                 "total_unidades,total_umv,total_pesos,comentarios,total_lineas,"+
+                 "anulado,anulado_en,anulado_motivo";
 async function traerPaginado(select, aviso){
   const t=await tokenValido();
   if(!t){ const e=new Error("no se pudo validar la sesión"); e.sesion=true; throw e; }
@@ -1880,22 +2008,26 @@ function pintarPedidosServidor(){
     (p.cliente||"").toLowerCase().includes(f) ||
     (p.vendedor_nombre||"").toLowerCase().includes(f) ||
     (p.vendedor_email||"").toLowerCase().includes(f) ||
-    (p.zona||"").toLowerCase().includes(f));
+    (p.zona||"").toLowerCase().includes(f) ||
+    (p.anulado ? "anulado" : "").includes(f));
   if(SRV_PEDIDOS.length===0){
     cont.innerHTML=`<div class="empty">Todavía no hay pedidos en el servidor.</div>`;
     $("#btnSrvExp").disabled=true; $("#btnSrvRes").disabled=true; return;
   }
   $("#btnSrvExp").disabled=false; $("#btnSrvRes").disabled=false;
-  const tU=l.reduce((s,p)=>s+(p.total_unidades||0),0);
-  const tM=l.reduce((s,p)=>s+Number(p.total_pesos||0),0);
-  const vend=new Set(l.map(p=>p.vendedor_email)).size;
-  const cli=new Set(l.map(p=>p.cliente)).size;
+  const viv=l.filter(p=>!p.anulado);
+  const nAnul=l.length-viv.length;
+  const tU=viv.reduce((s,p)=>s+(p.total_unidades||0),0);
+  const tM=viv.reduce((s,p)=>s+Number(p.total_pesos||0),0);
+  const vend=new Set(viv.map(p=>p.vendedor_email)).size;
+  const cli=new Set(viv.map(p=>p.cliente)).size;
   // se dibujan como máximo MAX_FILAS_VISTA, pero los totales son de TODO lo filtrado
   // y el aviso dice cuántos quedaron sin dibujar (nunca recortar en silencio)
   const vista = l.slice(0, MAX_FILAS_VISTA);
   const ocultos = l.length - vista.length;
   cont.innerHTML =
-    `<div class="hst-sum">${l.length} pedido(s) · ${vend} vendedor(es) · ${cli} cliente(s) · ${tU} u.${tM>0?` · $ ${fmtPrecio(tM)}`:""}`+
+    `<div class="hst-sum">${viv.length} pedido(s) · ${vend} vendedor(es) · ${cli} cliente(s) · ${tU} u.${tM>0?` · $ ${fmtPrecio(tM)}`:""}`+
+    (nAnul?`<br><span style="color:var(--danger)">+ ${nAnul} anulado(s), no cuentan en el total</span>`:"")+
     (ocultos?`<br><span style="color:#b35309">Se muestran los ${vista.length} más nuevos. Usá el filtro para llegar a los otros ${ocultos}. El Excel baja todos.</span>`:"")+
     `</div>`+
     (l.length===0?`<div class="empty">Sin coincidencias.</div>`:
@@ -1903,15 +2035,16 @@ function pintarPedidosServidor(){
       const d=new Date(p.fecha);
       const p2=n=>String(n).padStart(2,"0");
       const f=isNaN(d)?"":`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-      return `<div class="srv-row">
+      return `<div class="srv-row ${p.anulado?"anul":""}">
         <div class="srv-top">
-          <div class="srv-cli">${escH(p.cliente||"")}</div>
+          <div class="srv-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${escH(p.cliente||"")}</div>
           <div class="srv-tot">${p.total_unidades||0} u.${Number(p.total_pesos)>0?`<br>$ ${fmtPrecio(p.total_pesos)}`:""}</div>
         </div>
         <div class="srv-meta">
           <span class="srv-vend">${escH(p.vendedor_nombre||p.vendedor_email||"")}</span> · ${escH(f)}<br>
           ${escH(p.zona||"sin zona")} · ${p.total_lineas!=null?p.total_lineas:(p.lineas||[]).length} producto(s)
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
+          ${p.anulado?`<br><span style="color:var(--danger);font-weight:700">Anulado el ${escH(fechaCortaISO(p.anulado_en))}${p.anulado_motivo?` — “${escH(p.anulado_motivo)}”`:""}</span>`:""}
         </div>
       </div>`;
     }).join(""));
@@ -1927,9 +2060,9 @@ function pintarPedidosServidor(){
    El "Resumen" (un renglón por pedido) es lo que se usa día a día: son 1300
    filas, sale al instante y se abre en cualquier máquina.
    ========================================================================== */
-const COLS_RESUMEN=["Cliente","Zona","Vendedor","Fecha","Comentarios","Productos distintos",
-                    "Cantidad UMV","Unidades","Total"];
-const ANCHOS_RESUMEN=[38,22,20,17,30,18,13,11,15];
+const COLS_RESUMEN=["Estado","Cliente","Zona","Vendedor","Fecha","Comentarios","Productos distintos",
+                    "Cantidad UMV","Unidades","Total","Anulado el","Motivo anulación"];
+const ANCHOS_RESUMEN=[10,38,22,20,17,30,18,13,11,15,17,30];
 
 async function exportarResumenServidor(){
   if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
@@ -1941,17 +2074,22 @@ async function exportarResumenServidor(){
       (a.cliente||"").localeCompare(b.cliente||"") || String(a.fecha).localeCompare(String(b.fecha)));
     const rows=[COLS_RESUMEN.map(CTB)];
     let gL=0,gP=0,gU=0,gM=0;
+    let nAnul=0;
     l.forEach(p=>{
       const d=new Date(p.fecha);
-      rows.push([CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),
+      const da=p.anulado_en?new Date(p.anulado_en):null;
+      rows.push([CT(p.anulado?"ANULADO":""),
+        CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),
         CT(isNaN(d)?String(p.fecha||""):fechaHora(d)),CT(p.comentarios||""),
         CN(Number(p.total_lineas)||0),CN(Number(p.total_umv)||0),
-        CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0)]);
+        CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0),
+        CT(da&&!isNaN(da)?fechaHora(da):""),CT(p.anulado_motivo||"")]);
+      if(p.anulado){ nAnul++; return; }                 // los anulados no suman
       gL+=Number(p.total_lineas)||0; gP+=Number(p.total_umv)||0;
       gU+=Number(p.total_unidades)||0; gM+=Number(p.total_pesos)||0;
     });
-    rows.push([CTB(`TOTAL — ${l.length} pedido(s)`),CT(""),CT(""),CT(""),CT(""),
-      CNB(gL),CNB(gP),CNB(gU),CMB(gM)]);
+    rows.push([CT(""),CTB(`TOTAL — ${l.length-nAnul} pedido(s)`+(nAnul?` (${nAnul} anulado(s) no sumados)`:"")),
+      CT(""),CT(""),CT(""),CT(""),CNB(gL),CNB(gP),CNB(gU),CMB(gM),CT(""),CT("")]);
     descargarBlob(await construirXLSX(rows,{hoja:"Resumen", anchos:ANCHOS_RESUMEN}),
       `pedidos_resumen_${hoyLocal()}.xlsx`);
     toast(`✓ Resumen de ${l.length} pedido(s)`);
@@ -1989,7 +2127,7 @@ async function exportarServidor(){
       if(!grupos.has(p.cliente)) grupos.set(p.cliente,[]);
       grupos.get(p.cliente).push(p);
     });
-    let gU=0,gP=0,gM=0, nRen=0;
+    let gU=0,gP=0,gM=0, nRen=0, nAnulDet=0;
     const filas = function*(){
       yield COLS_PEDIDO.map(CTB);
       for(const [cliente,peds] of grupos){
@@ -2000,23 +2138,25 @@ async function exportarServidor(){
           let primera=true;
           for(const x of (p.lineas||[])){
             nRen++;
-            yield [CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
+            yield [CT(p.anulado?"ANULADO":""),
+              CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
               CT(primera ? (p.comentarios||"") : ""),CT(String(x.codigo||"")),CT(x.nombre||""),
               CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
               CM(Number(x.precio)||0),CM(Number(x.total)||0)];
             primera=false;
           }
+          if(p.anulado){ nAnulDet++; continue; }          // los anulados no suman
           sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
         }
-        yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+        yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
                CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)];
         yield [];
         gU+=sU; gP+=sP; gM+=sM;
       }
-      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL (sin anulados)"),
              CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)];
-      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
-             CTB(`${todos.length} pedido(s) · ${grupos.size} cliente(s)`)];
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${todos.length-nAnulDet} pedido(s) · ${grupos.size} cliente(s)`+(nAnulDet?` · ${nAnulDet} anulado(s)`:""))];
     };
     const blob = await construirXLSXGrande(filas, {hoja:"Pedidos", anchos:ANCHOS_PEDIDO,
       avance: n=>{ btn.textContent=`Armando… ${Math.round(n/1000)}k`; }});
@@ -2067,6 +2207,28 @@ async function revisarEstado(){
   }catch(e){ errCol=e.message; }
   html+=fila("Migración v6", colOK ? si("corrida") : no("FALTA correr supabase-migracion-v6.sql"));
   if(!colOK) arreglos.push("Corré <b>supabase-migracion-v6.sql</b> en Supabase → SQL Editor. Mientras no esté, el panel funciona igual pero más lento.");
+
+  let anulOK=false;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=anulado&limit=1`,
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    anulOK=r.ok;
+  }catch(e){}
+  html+=fila("Migración v10", anulOK ? si("corrida") : no("FALTA correr supabase-migracion-v10.sql"));
+  if(!anulOK) arreglos.push("Corré <b>supabase-migracion-v10.sql</b>. Sin eso no se pueden anular pedidos.");
+
+  let padrOK=false, enPadron=false;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/vendedores?select=nombre&email=eq.`+
+      encodeURIComponent((emailActual()||"").toLowerCase()),
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    padrOK=r.ok;
+    if(r.ok){ const d=await r.json(); enPadron=Array.isArray(d)&&d.length>0; }
+  }catch(e){}
+  html+=fila("Padrón vendedores", !padrOK ? no("FALTA correr supabase-migracion-v11.sql")
+              : (enPadron? si("tu ficha está cargada") : no("tu mail no está en el padrón")));
+  if(!padrOK) arreglos.push("Corré <b>supabase-migracion-v11.sql</b> para que aparezcan los nombres y apellidos.");
+  else if(!enPadron) arreglos.push("Tu mail no está en la tabla <b>vendedores</b>: los pedidos van a salir con el mail en vez del nombre.");
 
   let nSrv="—", errSrv="";
   try{
