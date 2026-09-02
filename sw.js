@@ -1,5 +1,5 @@
 /* Service Worker — Pedidos Mooving (PWA con actualización automática) */
-const CACHE = "pedidos-mooving-v13";
+const CACHE = "pedidos-mooving-v14";
 const SHELL = [
   "./",
   "./index.html",
@@ -27,6 +27,14 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
+
+  /* NUNCA tocar las llamadas al servidor de datos (Supabase).
+     Son datos que cambian a cada rato y van atados a la sesión del usuario.
+     Guardarlas en el caché hacía que el panel del administrador quedara
+     congelado en una foto vieja: los pedidos nuevos no aparecían nunca,
+     ni tocando el botón de actualizar. */
+  if (url.hostname.endsWith(".supabase.co")) return;
+
   const dinamico = req.mode === "navigate"
     || url.pathname.endsWith(".html")
     || url.pathname.endsWith(".json")
