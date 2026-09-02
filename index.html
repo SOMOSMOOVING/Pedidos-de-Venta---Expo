@@ -93,6 +93,35 @@
   .adm-modo{display:flex; flex-direction:column; gap:7px; margin-bottom:10px;}
   .adm-modo label{font-size:12.5px; color:var(--ink); display:flex; align-items:flex-start; gap:7px; line-height:1.4;}
   .adm-modo input{margin-top:2px;}
+  /* Importar un pedido desde Excel */
+  .tag-imp{display:inline-block; background:var(--brand); color:#fff; font-size:10px;
+           font-weight:800; padding:2px 6px; border-radius:5px; vertical-align:middle;
+           letter-spacing:.4px; text-decoration:none;}
+  .imp-card{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .imp-txt{flex:1 1 130px; min-width:0;}
+  .imp-txt b{display:block; font-size:13px; line-height:1.3;}
+  .imp-txt span{display:block; font-size:11.5px; color:var(--muted); line-height:1.35; margin-top:2px;}
+  .imp-btns{display:flex; gap:8px; flex:0 0 auto;}
+  .imp-btns .btn{padding:10px 13px; font-size:13px; min-width:0;}
+  .imp-sum{background:#f3edff; border:1px solid var(--line); border-radius:10px;
+    padding:11px 13px; font-size:13px; color:var(--brand-dark); line-height:1.55; margin-bottom:12px;}
+  .imp-sum b{font-size:14px;}
+  .imp-dato{display:flex; gap:8px; font-size:12.5px; line-height:1.5; padding:2px 0;}
+  .imp-dato > b{flex:0 0 92px; color:var(--muted); font-weight:600;}
+  .imp-dato > span{flex:1 1 auto; min-width:0; word-break:break-word;}
+  .imp-bloque{border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px;}
+  .imp-bloque h4{margin:0 0 8px; font-size:13.5px;}
+  .imp-bloque.mal{border-color:#f0d9d2; background:#fbf7f6;}
+  .imp-bloque.mal h4{color:var(--danger);}
+  .imp-lista{max-height:220px; overflow:auto; -webkit-overflow-scrolling:touch;}
+  .imp-fila{display:flex; gap:8px; font-size:12px; line-height:1.4; padding:5px 0;
+            border-top:1px dashed var(--line);}
+  .imp-fila:first-child{border-top:none;}
+  .imp-fila .f{flex:0 0 42px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .imp-fila .d{flex:1 1 auto; min-width:0;}
+  .imp-fila .q{flex:0 0 auto; font-weight:700; white-space:nowrap;}
+  .imp-fila.mal .d{color:var(--danger);}
+  .imp-aviso{font-size:12.5px; color:#b35309; line-height:1.5; margin-bottom:10px;}
   /* Login */
   #login{
     position:fixed; inset:0; z-index:100; background:var(--bg);
@@ -386,6 +415,20 @@
     <textarea id="comentarios" rows="3" placeholder="Notas del pedido, condiciones, fecha de entrega…"></textarea>
   </div>
 
+  <!-- Importar un pedido que vino cargado en Excel (para quien no usa la app).
+       No toca el pedido que estés armando en pantalla: entra como un pedido aparte. -->
+  <div class="card imp-card">
+    <div class="imp-txt">
+      <b>Pedido cargado en Excel</b>
+      <span>Para quien no usa la app</span>
+    </div>
+    <div class="imp-btns">
+      <button class="btn ghost" id="btnPlantilla" title="Descargar la plantilla de pedido en Excel">⬇ Plantilla</button>
+      <button class="btn" id="btnImportar" title="Importar un pedido desde un Excel">⬆ Importar</button>
+    </div>
+    <input type="file" id="fileImp" accept=".xlsx,.csv" style="display:none">
+  </div>
+
   <div class="search">
     <input type="text" id="buscar" placeholder="Buscar por código, EAN o descripción…" autocomplete="off">
     <button class="btn scan" id="btnScan" title="Escanear código de barras">
@@ -504,6 +547,18 @@
   </div>
 </div>
 
+<!-- Revisión de un pedido importado: nada se guarda hasta tocar Confirmar -->
+<div class="modal" id="impModal">
+  <div class="sheet">
+    <h2>Revisar el pedido importado</h2>
+    <div class="body" id="impBody"></div>
+    <div class="foot">
+      <button class="btn ghost" id="btnImpCancelar" style="flex:1">Cancelar</button>
+      <button class="btn" id="btnImpConfirmar" style="flex:1">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <div class="footer">
   <div class="sum">
     <b id="resumenLinea">0 prod. · 0 u.</b>
@@ -599,7 +654,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v11";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v13";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -975,6 +1030,12 @@ function pendientes(){ return historial().filter(p=>p.sync!=="ok"); }
    nunca duplica.
    ========================================================================== */
 let sincronizando=false;
+/* Si la base todavía no tiene la migración v13, las columnas de importación no
+   existen y el servidor rechaza el pedido entero con un 400. En ese caso se
+   prende este interruptor y el pedido se sube sin esos campos: es mejor perder
+   el dato de quién lo vendió originalmente que dejar el pedido sin subir.
+   La app avisa una vez, para que se sepa que falta correr la migración. */
+let SIN_COL_IMPORT=false;
 function filaServidor(ped){
   const f = {
     pedido_ref: ped.id,
@@ -997,7 +1058,17 @@ function filaServidor(ped){
     f.anulado_motivo = ped.anuladoMotivo || "";
     if(ped.anuladoISO) f.anulado_en = ped.anuladoISO;
   }
+  // Ídem para la migración v13: solo si el pedido vino de un Excel.
+  if(ped.importado && !SIN_COL_IMPORT){
+    f.importado = true;
+    f.vendedor_origen = ped.vendedorOrigen || "";
+    f.importado_archivo = ped.importadoArchivo || "";
+  }
   return f;
+}
+/* ¿el 400 es porque falta la migración v13? */
+function esFaltaColumnaImport(txt){
+  return /vendedor_origen|importado_archivo|\bimportado\b/i.test(txt||"");
 }
 async function sincronizar(manual){
   if(sincronizando) return;
@@ -1016,21 +1087,35 @@ async function sincronizar(manual){
     if(manual) toast("No se pudo validar la sesión. Probá de nuevo con señal.", true);
     return;
   }
-  let ok=0, fallo=0;
+  let ok=0, fallo=0, avisoMigracion=false;
+  const subir = ped => fetch(SB_URL+"/rest/v1/pedidos?on_conflict=vendedor_id,pedido_ref",{
+    method:"POST",
+    headers:{
+      apikey:SB_KEY, Authorization:"Bearer "+t,
+      "Content-Type":"application/json",
+      Prefer:"resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(filaServidor(ped))
+  });
   for(const ped of cola){
     try{
-      const r=await fetch(SB_URL+"/rest/v1/pedidos?on_conflict=vendedor_id,pedido_ref",{
-        method:"POST",
-        headers:{
-          apikey:SB_KEY, Authorization:"Bearer "+t,
-          "Content-Type":"application/json",
-          Prefer:"resolution=merge-duplicates,return=minimal"
-        },
-        body: JSON.stringify(filaServidor(ped))
-      });
+      let r=await subir(ped);
+      // Falta la migración v13: reintentar sin las columnas de importación,
+      // así el pedido se sube igual en vez de quedar trabado para siempre.
+      if(!r.ok && r.status===400 && ped.importado && !SIN_COL_IMPORT){
+        let detalle=""; try{ detalle=await r.text(); }catch(x){}
+        if(esFaltaColumnaImport(detalle)){
+          SIN_COL_IMPORT=true; avisoMigracion=true;
+          r=await subir(ped);
+        }
+      }
       if(r.ok){ marcarSync(ped.id,"ok"); ok++; }
       else{ fallo++; }
     }catch(e){ fallo++; break; }   // se cortó la red: dejamos el resto para después
+  }
+  if(avisoMigracion){
+    toast("Falta correr la migración v13 en la base: los pedidos importados se suben, "+
+          "pero sin el vendedor original", true);
   }
   sincronizando=false;
   pintarSyncBar(); pintarHistorial();
@@ -1697,6 +1782,14 @@ function fechaHora(d){
   const p2=n=>String(n).padStart(2,"0");
   return `${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
+/* Para los Excel: en un pedido importado la columna Vendedor tiene que decir
+   las dos cosas — de quién era el pedido y quién lo cargó al sistema. Se pone
+   en la misma celda a propósito: agregar una columna más a un detalle de
+   700.000 renglones no vale la pena, y acá es donde uno lo va a buscar. */
+function vendedorParaExcel(quienSubio, origen, importado){
+  if(!importado || !origen) return quienSubio || "";
+  return `${origen} (importado por ${quienSubio||"—"})`;
+}
 /* arma el objeto pedido con todo lo que hace falta para el Excel, el historial y el servidor */
 function armarPedido(){
   const l = lineasPedido();
@@ -1724,7 +1817,8 @@ function armarPedido(){
 function filasDePedido(ped){
   return ped.lineas.map((x,i)=>[
     CT(ped.anulado?"ANULADO":""),
-    CT(ped.cliente), CT(ped.zona), CT(ped.vendedor), CT(ped.fecha),
+    CT(ped.cliente), CT(ped.zona),
+    CT(vendedorParaExcel(ped.vendedor, ped.vendedorOrigen, ped.importado)), CT(ped.fecha),
     CT(i===0 ? (ped.comentarios||"") : ""),
     CT(String(x.codigo)), CT(x.nombre), CN(x.umv), CN(x.packs), CN(x.unidades),
     CM(x.precio), CM(x.total)
@@ -1740,7 +1834,9 @@ function filasDePedido(ped){
    ========================================================================== */
 const COLS_ITEM   = ["Código","Descripción","UMV (u/bulto)","Cantidad UMV","Unidades","Precio unit.","Total"];
 const ANCHOS_ITEM = [14,46,14,14,11,13,15];
-const FILA_ENCABEZADO_ITEMS = 8;   // en qué fila arranca la tabla (para el futuro importador)
+/* La fila donde arranca la tabla de artículos se corre según los datos de
+   cabecera (anulación, importación), así que el importador NO la asume:
+   busca el renglón de títulos. Ver buscarEncabezadoItems(). */
 
 function filasPedidoUnico(ped){
   const rows=[];
@@ -1751,7 +1847,11 @@ function filasPedidoUnico(ped){
   }
   rows.push([CTB("Cliente"),     CT(ped.cliente||"")]);
   rows.push([CTB("Zona"),        CT(ped.zona||"")]);
-  rows.push([CTB("Vendedor"),    CT(ped.vendedor||"")]);
+  rows.push([CTB("Vendedor"),    CT(ped.importado ? (ped.vendedorOrigen||"—") : (ped.vendedor||""))]);
+  if(ped.importado){
+    rows.push([CTB("Importado por"), CT(ped.vendedor||"")]);
+    rows.push([CTB("Archivo"),       CT(ped.importadoArchivo||"")]);
+  }
   rows.push([CTB("Fecha"),       CT(ped.fecha||"")]);
   rows.push([CTB("Comentarios"), CT(ped.comentarios||"")]);
   rows.push([]);                                  // renglón en blanco
@@ -1805,12 +1905,13 @@ function pintarHistorial(){
     h.map(p=>`
       <div class="hst ${p.anulado?"anul":""}">
         <div class="hst-top">
-          <div class="hst-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${escH(p.cliente)}</div>
+          <div class="hst-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${p.importado?`<span class="tag-imp">IMPORTADO</span> `:""}${escH(p.cliente)}</div>
           <div class="hst-tot">${p.totalUnidades} u.${(p.totalPesos>0)?`<br>$ ${fmtPrecio(p.totalPesos)}`:""}</div>
         </div>
         <div class="hst-meta">
           ${escH(p.zona||"sin zona")}<br>
           ${escH(p.fecha)} · ${escH(p.vendedor||"sin vendedor")} · ${p.lineas.length} producto(s)
+          ${p.importado?`<br>Vendedor: <b>${escH(p.vendedorOrigen||"no vino en la planilla")}</b> · importado de Excel${p.importadoArchivo?` (${escH(p.importadoArchivo)})`:""}`:""}
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
           ${p.anulado?`<br><span style="color:var(--danger);font-weight:700">Anulado el ${escH(fechaCortaISO(p.anuladoISO))}${p.anuladoMotivo?` — “${escH(p.anuladoMotivo)}”`:""}</span>`:""}
           <br><span class="sync-pill ${p.sync==="ok"?"ok":(navigator.onLine?"pend":"off")}">${
@@ -1946,7 +2047,7 @@ const MAX_FILAS_VISTA=300;  // cuántos se dibujan (el resto se llega con el fil
    medio megabyte y diez. Las líneas se piden aparte, solo para el Excel. */
 const COLS_LISTA="id,pedido_ref,cliente,zona,vendedor_nombre,vendedor_email,fecha,"+
                  "total_unidades,total_umv,total_pesos,comentarios,total_lineas,"+
-                 "anulado,anulado_en,anulado_motivo";
+                 "anulado,anulado_en,anulado_motivo,importado,vendedor_origen";
 async function traerPaginado(select, aviso){
   const t=await tokenValido();
   if(!t){ const e=new Error("no se pudo validar la sesión"); e.sesion=true; throw e; }
@@ -1978,7 +2079,8 @@ async function traerListaPedidos(aviso){
     SRV_MODO="liviano"; return l;
   }catch(e){
     if(e.sesion) throw e;
-    const faltaColumna = e.status===400 || /total_lineas|column|does not exist/i.test(e.message||"");
+    const faltaColumna = e.status===400 ||
+      /total_lineas|vendedor_origen|importado|column|does not exist/i.test(e.message||"");
     if(!faltaColumna) throw e;
     const l=await traerPaginado("*", aviso);     // respaldo sin la columna nueva
     SRV_MODO="completo"; return l;
@@ -2037,12 +2139,13 @@ function pintarPedidosServidor(){
       const f=isNaN(d)?"":`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
       return `<div class="srv-row ${p.anulado?"anul":""}">
         <div class="srv-top">
-          <div class="srv-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${escH(p.cliente||"")}</div>
+          <div class="srv-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${p.importado?`<span class="tag-imp">IMPORTADO</span> `:""}${escH(p.cliente||"")}</div>
           <div class="srv-tot">${p.total_unidades||0} u.${Number(p.total_pesos)>0?`<br>$ ${fmtPrecio(p.total_pesos)}`:""}</div>
         </div>
         <div class="srv-meta">
           <span class="srv-vend">${escH(p.vendedor_nombre||p.vendedor_email||"")}</span> · ${escH(f)}<br>
           ${escH(p.zona||"sin zona")} · ${p.total_lineas!=null?p.total_lineas:(p.lineas||[]).length} producto(s)
+          ${p.importado?`<br>Vendedor: <b>${escH(p.vendedor_origen||"no vino en la planilla")}</b> · lo importó ${escH(p.vendedor_nombre||p.vendedor_email||"")}`:""}
           ${p.comentarios?`<br>“${escH(p.comentarios)}”`:""}
           ${p.anulado?`<br><span style="color:var(--danger);font-weight:700">Anulado el ${escH(fechaCortaISO(p.anulado_en))}${p.anulado_motivo?` — “${escH(p.anulado_motivo)}”`:""}</span>`:""}
         </div>
@@ -2079,7 +2182,8 @@ async function exportarResumenServidor(){
       const d=new Date(p.fecha);
       const da=p.anulado_en?new Date(p.anulado_en):null;
       rows.push([CT(p.anulado?"ANULADO":""),
-        CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),
+        CT(p.cliente||""),CT(p.zona||""),
+        CT(vendedorParaExcel(p.vendedor_nombre||p.vendedor_email||"", p.vendedor_origen, p.importado)),
         CT(isNaN(d)?String(p.fecha||""):fechaHora(d)),CT(p.comentarios||""),
         CN(Number(p.total_lineas)||0),CN(Number(p.total_umv)||0),
         CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0),
@@ -2136,10 +2240,11 @@ async function exportarServidor(){
           const d=new Date(p.fecha);
           const f=isNaN(d)?String(p.fecha||""):fechaHora(d);
           let primera=true;
+          const vend=vendedorParaExcel(p.vendedor_nombre||p.vendedor_email||"", p.vendedor_origen, p.importado);
           for(const x of (p.lineas||[])){
             nRen++;
             yield [CT(p.anulado?"ANULADO":""),
-              CT(p.cliente||""),CT(p.zona||""),CT(p.vendedor_nombre||p.vendedor_email||""),CT(f),
+              CT(p.cliente||""),CT(p.zona||""),CT(vend),CT(f),
               CT(primera ? (p.comentarios||"") : ""),CT(String(x.codigo||"")),CT(x.nombre||""),
               CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
               CM(Number(x.precio)||0),CM(Number(x.total)||0)];
@@ -2216,6 +2321,15 @@ async function revisarEstado(){
   }catch(e){}
   html+=fila("Migración v10", anulOK ? si("corrida") : no("FALTA correr supabase-migracion-v10.sql"));
   if(!anulOK) arreglos.push("Corré <b>supabase-migracion-v10.sql</b>. Sin eso no se pueden anular pedidos.");
+
+  let impOK=false;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=vendedor_origen&limit=1`,
+      {headers:{apikey:SB_KEY,Authorization:"Bearer "+t}});
+    impOK=r.ok;
+  }catch(e){}
+  html+=fila("Migración v13", impOK ? si("corrida") : no("FALTA correr supabase-migracion-v13.sql"));
+  if(!impOK) arreglos.push("Corré <b>supabase-migracion-v13.sql</b>. Sin eso los pedidos importados de Excel se suben igual, pero se pierde el nombre del vendedor original.");
 
   let padrOK=false, enPadron=false;
   try{
@@ -2403,6 +2517,358 @@ async function importarClientes(file, modo){
   CLIENTES=Array.from(map.values());
   return {leidos,act,add,omit,total:CLIENTES.length,modo};
 }
+/* ==========================================================================
+   IMPORTAR UN PEDIDO DESDE EXCEL
+   --------------------------------------------------------------------------
+   Para la gente que no va a usar la app: llena la plantilla en Excel, la manda
+   por mail o WhatsApp, y cualquier vendedor logueado la importa desde acá.
+
+   El pedido queda cargado a nombre de quien lo sube: eso lo obliga la base de
+   datos y no se puede falsear (la política dice "el pedido es de quien lo
+   inserta"). Por eso se guarda aparte el campo "Vendedor" que vino en la
+   planilla, en la columna vendedor_origen: así se sabe de quién era el pedido
+   y quién lo cargó. Las dos cosas, no una.
+
+   El lector es tolerante a propósito: no exige que la planilla sea exactamente
+   la plantilla. Busca el renglón que tenga la columna "Código" y lee de ahí
+   para abajo, y arriba de ese renglón busca las etiquetas Vendedor, Cliente y
+   Comentarios. Eso hace que también se pueda importar el Excel que genera la
+   propia app: bajar un pedido, corregirlo en la computadora y volver a subirlo.
+
+   Nada se guarda hasta que la persona ve el resumen y toca Confirmar.
+   ========================================================================== */
+const IMP_COLS   = ["Código","Unidades"];
+const IMP_ANCHOS = [20,44];
+const IMP_MAX_RENGLONES = 5000;    // freno: una planilla más grande que esto es un error
+
+/* etiquetas que se aceptan en el bloque de cabecera */
+const IMP_CLAVES = {
+  vendedor:    ["vendedor","vendedor original","representante","viajante","vendedora"],
+  cliente:     ["cliente","razon social","cliente/razon social"],
+  comentarios: ["comentarios","comentario","observaciones","observacion","notas","nota"]
+};
+/* títulos que se aceptan para cada columna de la tabla de artículos */
+const IMP_TIT_COD  = ["codigo","codigo producto","codigo de producto","cod","sku","articulo","art"];
+const IMP_TIT_UNI  = ["unidades","unidades a pedir","cantidad de unidades","u"];
+const IMP_TIT_PACK = ["cantidad umv","umv a pedir","bultos","cantidad de bultos","packs","cajas"];
+const IMP_TIT_CANT = ["cantidad","cant"];
+const IMP_TIT_EAN  = ["ean","codigo de barras","codigo barras","barcode"];
+
+/* como norm(), pero además aplasta espacios y saca los dos puntos del final:
+   "Cliente :" y "cliente" tienen que ser la misma etiqueta */
+function normClave(v){ return norm(v).replace(/\s+/g," ").replace(/[\s:.]+$/,""); }
+function celda(fila, i){ return String((fila && fila[i]!=null) ? fila[i] : "").trim(); }
+
+/* ---------- PLANTILLA ---------- */
+async function descargarPlantillaPedido(){
+  const ej = PRODUCTOS[0];
+  const ejTxt = ej
+    ? `Por ejemplo, para el producto ${ej.codigo} la UMV es ${ej.umv}: van ${ej.umv}, ${ej.umv*2}, ${ej.umv*3}… unidades.`
+    : "";
+  const rows = [
+    [CTB("PLANTILLA DE PEDIDO — MOOVING")],
+    [CT("1) Completá Vendedor, Cliente y Comentarios en las celdas de al lado.")],
+    [CT("2) Abajo, una fila por producto: el código y cuántas UNIDADES (no bultos).")],
+    [CT("3) La cantidad tiene que ser múltiplo de la UMV del producto. "+ejTxt)],
+    [CT("No cambies los títulos Código y Unidades. La descripción y el precio los completa la app sola.")],
+    [],
+    [CTB("Vendedor"),    CT("")],
+    [CTB("Cliente"),     CT("")],
+    [CTB("Comentarios"), CT("")],
+    [],
+    IMP_COLS.map(CTB)
+  ];
+  descargarBlob(await construirXLSX(rows, {hoja:"Pedido", anchos:IMP_ANCHOS}),
+                "plantilla_pedido_mooving.xlsx");
+}
+
+/* ---------- LECTURA ---------- */
+/* Busca el renglón de títulos de la tabla de artículos. Tiene que tener una
+   columna de código Y una de cantidad: si no, no es el encabezado. */
+function buscarEncabezadoItems(rows){
+  const primero = (hdr, lista) => { for(const a of lista){ const j=hdr.indexOf(a); if(j>=0) return j; } return -1; };
+  for(let r=0; r<rows.length; r++){
+    const hdr = (rows[r]||[]).map(normClave);
+    const colCod = primero(hdr, IMP_TIT_COD);
+    if(colCod<0) continue;
+    let colCant = primero(hdr, IMP_TIT_UNI), porUMV = false;
+    if(colCant<0){ colCant = primero(hdr, IMP_TIT_PACK); porUMV = colCant>=0; }
+    if(colCant<0){ colCant = primero(hdr, IMP_TIT_CANT); }
+    if(colCant<0) continue;
+    return { fila:r, colCod, colCant, porUMV, colEan:primero(hdr, IMP_TIT_EAN) };
+  }
+  return null;
+}
+/* Lee las etiquetas del bloque de arriba. El valor es la primera celda no
+   vacía a la derecha de la etiqueta. */
+function leerCabeceraImport(rows, hasta){
+  const out = {vendedor:"", cliente:"", comentarios:""};
+  for(let r=0; r<hasta; r++){
+    const fila = rows[r]; if(!fila) continue;
+    for(let c=0; c<fila.length; c++){
+      const k = normClave(fila[c]); if(!k) continue;
+      let campo = null;
+      for(const nombre in IMP_CLAVES){ if(IMP_CLAVES[nombre].indexOf(k)>=0){ campo=nombre; break; } }
+      if(!campo || out[campo]) continue;
+      for(let d=c+1; d<c+8; d++){
+        const v = celda(fila, d);
+        if(v){ out[campo]=v; break; }
+      }
+    }
+  }
+  return out;
+}
+/* Los códigos del catálogo son todos numéricos, pero Excel puede devolverlos
+   como número ("1002229") o como texto con espacios o con un ".0" pegado. */
+function normCodigo(v){
+  let s = String(v==null?"":v).trim();
+  if(/^\d+\.0+$/.test(s)) s = s.split(".")[0];
+  return s.toUpperCase();
+}
+/* Cantidad: acepta "32", "32 u", "32,0". Devuelve null si no es un entero > 0. */
+function normCantidad(v){
+  if(v==null) return null;
+  let s = String(v).trim().replace(/[^\d,.-]/g,"");
+  if(!s) return null;
+  if(s.indexOf(",")>=0 && s.indexOf(".")<0) s = s.replace(",",".");
+  const n = parseFloat(s);
+  if(!isFinite(n) || n<=0) return null;
+  if(Math.abs(n-Math.round(n)) > 1e-9) return null;
+  return Math.round(n);
+}
+/* Cliente escrito a mano: lo buscamos ignorando mayúsculas y acentos y
+   devolvemos el nombre tal como está en la lista, así la zona y los
+   agrupamientos por cliente siguen funcionando. */
+function clienteCanonico(nombre){
+  const n = norm(nombre); if(!n) return null;
+  let c = CLIENTES.find(x=>norm(x.nombre)===n);
+  if(c) return c;
+  const flojo = s=>norm(s).replace(/[^a-z0-9]/g,"");
+  const f = flojo(nombre);
+  if(f.length>=4) c = CLIENTES.find(x=>flojo(x.nombre)===f);
+  return c || null;
+}
+
+async function leerPedidoDeExcel(file){
+  const rows = await leerArchivo(file);
+  if(!rows || !rows.length) throw new Error("el archivo está vacío");
+
+  const enc = buscarEncabezadoItems(rows);
+  if(!enc) throw new Error(
+    "no se encontró la tabla de artículos. La planilla necesita una fila de títulos "+
+    "con las columnas Código y Unidades. Bajá la plantilla con el botón de al lado y "+
+    "usala como base.");
+
+  const cab = leerCabeceraImport(rows, enc.fila);
+
+  const porCod = new Map(PRODUCTOS.map(p=>[normCodigo(p.codigo), p]));
+  const porEan = new Map();
+  PRODUCTOS.forEach(p=>{ const e=String(p.ean||"").trim(); if(e) porEan.set(e, p); });
+
+  const acum = new Map();          // código de catálogo -> unidades (suma los repetidos)
+  const problemas = [];            // {fila, texto}
+  const avisos = [];               // cosas que no impiden importar
+  let repetidos = 0;
+
+  const tope = Math.min(rows.length, enc.fila+1+IMP_MAX_RENGLONES);
+  for(let r=enc.fila+1; r<tope; r++){
+    const fila = rows[r]; if(!fila) continue;
+    const nFila = r+1;                                   // número de fila como se ve en Excel
+    const codTxt  = celda(fila, enc.colCod);
+    const cantTxt = celda(fila, enc.colCant);
+    const eanTxt  = enc.colEan>=0 ? celda(fila, enc.colEan) : "";
+    if(!codTxt && !cantTxt) continue;                    // renglón en blanco
+    if(/^total/.test(normClave(codTxt))) continue;        // renglón de totales del Excel de la app
+
+    if(!codTxt){
+      problemas.push({fila:nFila, texto:`hay una cantidad (${cantTxt}) pero la celda de código está vacía`});
+      continue;
+    }
+    let prod = porCod.get(normCodigo(codTxt));
+    if(!prod && eanTxt) prod = porEan.get(eanTxt);
+    if(!prod && /^\d{8,14}$/.test(codTxt)) prod = porEan.get(codTxt);   // pusieron el EAN en la columna de código
+    if(!prod){
+      problemas.push({fila:nFila, texto:`el código ${codTxt} no está en el catálogo`});
+      continue;
+    }
+    const u = normCantidad(cantTxt);
+    if(u===null){
+      problemas.push({fila:nFila, texto:`${prod.codigo}: la cantidad "${cantTxt||"(vacía)"}" no es un número entero mayor que cero`});
+      continue;
+    }
+    const unidades = enc.porUMV ? u*prod.umv : u;
+    if(unidades % prod.umv !== 0){
+      const menos = Math.floor(unidades/prod.umv)*prod.umv;
+      const mas   = menos + prod.umv;
+      problemas.push({fila:nFila, texto:`${prod.codigo}: ${unidades} unidades no es múltiplo de la UMV (${prod.umv}). Tiene que ser ${menos>0?menos+" o ":""}${mas}`});
+      continue;
+    }
+    if(acum.has(prod.codigo)){ repetidos++; acum.set(prod.codigo, acum.get(prod.codigo)+unidades); }
+    else acum.set(prod.codigo, unidades);
+  }
+
+  if(rows.length > tope){
+    avisos.push(`La planilla tiene más de ${IMP_MAX_RENGLONES} renglones de artículos: se leyeron los primeros ${IMP_MAX_RENGLONES}.`);
+  }
+  if(repetidos){
+    avisos.push(`${repetidos} código(s) aparecían más de una vez: las cantidades se sumaron.`);
+  }
+  if(enc.porUMV){
+    avisos.push("La planilla traía la cantidad en bultos (UMV), no en unidades: se multiplicó por la UMV de cada producto.");
+  }
+
+  const lineas = Array.from(acum, ([codigo, unidades])=>{
+    const p = PRODUCTOS.find(x=>x.codigo===codigo);
+    return { codigo:p.codigo, nombre:p.nombre, umv:p.umv, ean:p.ean||"",
+             precio:precioDe(p), unidades, packs:unidades/p.umv,
+             total:unidades*precioDe(p) };
+  });
+
+  // cliente
+  let cliente = cab.cliente, zona = "", clienteEnLista = false;
+  if(cliente){
+    const c = clienteCanonico(cliente);
+    if(c){ cliente = c.nombre; zona = c.zona||""; clienteEnLista = true; }
+    else avisos.push(`El cliente "${cliente}" no está en la lista: el pedido queda con ese nombre y sin zona.`);
+  }else{
+    avisos.push("La planilla no dice el cliente: el pedido queda como SIN CLIENTE.");
+  }
+  if(!cab.vendedor) avisos.push("La planilla no dice el vendedor: no se va a poder saber de quién era el pedido.");
+
+  return {
+    archivo: file.name,
+    vendedor: cab.vendedor,
+    cliente: cliente || "",
+    clienteEnLista, zona,
+    comentarios: cab.comentarios,
+    lineas, problemas, avisos,
+    filaEncabezado: enc.fila+1,
+    totalUnidades: lineas.reduce((s,x)=>s+x.unidades,0),
+    totalUMV:      lineas.reduce((s,x)=>s+x.packs,0),
+    totalPesos:    lineas.reduce((s,x)=>s+x.total,0)
+  };
+}
+
+/* ---------- REVISIÓN ---------- */
+let IMP_ACTUAL = null;
+
+function pintarRevisionImport(res){
+  IMP_ACTUAL = res;
+  const n = res.lineas.length, mal = res.problemas.length;
+  const dato = (k,v)=>`<div class="imp-dato"><b>${k}</b><span>${v}</span></div>`;
+  let html =
+    `<div class="imp-sum"><b>${n} artículo(s) listo(s) para importar</b>`+
+    (mal?`<br><span style="color:var(--danger);font-weight:700">${mal} renglón(es) con problema, quedan afuera</span>`:"")+
+    `<br>${res.totalUnidades} unidades · ${res.totalUMV} UMV`+
+    (res.totalPesos>0?` · $ ${fmtPrecio(res.totalPesos)}`:"")+`</div>`;
+
+  html += `<div class="imp-bloque">`+
+    dato("Archivo", escH(res.archivo))+
+    dato("Vendedor", res.vendedor
+        ? escH(res.vendedor)
+        : `<span style="color:#b35309">no vino en la planilla</span>`)+
+    dato("Cliente", res.cliente
+        ? escH(res.cliente)+(res.clienteEnLista?"":` <span style="color:#b35309">(no está en la lista)</span>`)
+        : `<span style="color:#b35309">SIN CLIENTE</span>`)+
+    dato("Zona", escH(res.zona||"sin zona"))+
+    dato("Comentarios", res.comentarios?escH(res.comentarios):"—")+
+    dato("Lo sube", escH(usuarioActual()))+
+    `</div>`;
+
+  if(res.avisos.length){
+    html += `<div class="imp-aviso">`+res.avisos.map(a=>"⚠ "+escH(a)).join("<br>")+`</div>`;
+  }
+
+  if(mal){
+    html += `<div class="imp-bloque mal"><h4>${mal} renglón(es) con problema</h4><div class="imp-lista">`+
+      res.problemas.map(p=>`<div class="imp-fila mal"><div class="f">f.${p.fila}</div><div class="d">${escH(p.texto)}</div></div>`).join("")+
+      `</div></div>`;
+  }
+
+  if(n){
+    const muestra = res.lineas.slice(0,200);
+    html += `<div class="imp-bloque"><h4>Artículos que se van a importar</h4><div class="imp-lista">`+
+      muestra.map(x=>`<div class="imp-fila"><div class="f">${escH(x.codigo)}</div><div class="d">${escH(x.nombre)}</div><div class="q">${x.unidades} u.</div></div>`).join("")+
+      (res.lineas.length>muestra.length?`<div class="imp-fila"><div class="d">…y ${res.lineas.length-muestra.length} más</div></div>`:"")+
+      `</div></div>`;
+  }else{
+    html += `<div class="empty">No hay ningún renglón válido para importar.<br><br>`+
+            `Revisá que los códigos existan en el catálogo y que las cantidades sean múltiplo de la UMV.</div>`;
+  }
+
+  $("#impBody").innerHTML = html;
+  const b = $("#btnImpConfirmar");
+  b.disabled = n===0;
+  b.textContent = n ? `Confirmar (${n})` : "Confirmar";
+  $("#impModal").classList.add("open");
+}
+
+function armarPedidoImportado(res){
+  const ahora = new Date();
+  const l = res.lineas;
+  return {
+    id: "P" + ahora.getTime().toString(36).toUpperCase() + Math.floor(Math.random()*1296).toString(36).toUpperCase(),
+    cliente: res.cliente || "SIN CLIENTE",
+    zona: res.zona || "",
+    vendedor: usuarioActual(),
+    vendedorEmail: emailActual(),
+    importado: true,
+    vendedorOrigen: res.vendedor || "",
+    importadoArchivo: res.archivo || "",
+    fechaISO: ahora.toISOString(),
+    fecha: fechaHora(ahora),
+    comentarios: (res.comentarios||"").replace(/\r?\n/g," "),
+    lineas: l,
+    totalUnidades: l.reduce((s,x)=>s+x.unidades,0),
+    totalUMV: l.reduce((s,x)=>s+x.packs,0),
+    totalPesos: l.reduce((s,x)=>s+x.total,0)
+  };
+}
+
+function confirmarImportacion(){
+  const res = IMP_ACTUAL;
+  if(!res || !res.lineas.length) return;
+  const ped = armarPedidoImportado(res);
+  guardarEnHistorial(ped);
+  IMP_ACTUAL = null;
+  $("#impModal").classList.remove("open");
+  toast(`✓ Pedido de ${ped.cliente} importado (${ped.lineas.length} artículos)`);
+  $("#histModal").classList.add("open");
+  pintarHistorial();
+}
+
+function initImportPedido(){
+  $("#btnPlantilla").addEventListener("click", async ()=>{
+    const b=$("#btnPlantilla"), t=b.textContent;
+    b.disabled=true; b.textContent="…";
+    try{ await descargarPlantillaPedido(); }
+    catch(e){ alert("No se pudo armar la plantilla.\n\n"+e.message); }
+    b.disabled=false; b.textContent=t;
+  });
+  $("#btnImportar").addEventListener("click", ()=> $("#fileImp").click());
+  $("#fileImp").addEventListener("change", async e=>{
+    const f=e.target.files[0]; e.target.value="";
+    if(!f) return;
+    if(!sesion){ alert("Tenés que estar logueado para importar un pedido."); return; }
+    const b=$("#btnImportar"), t=b.textContent;
+    b.disabled=true; b.textContent="Leyendo…";
+    try{
+      const res = await leerPedidoDeExcel(f);
+      pintarRevisionImport(res);
+    }catch(err){
+      alert("No se pudo leer la planilla.\n\n"+err.message);
+    }
+    b.disabled=false; b.textContent=t;
+  });
+  $("#btnImpCancelar").addEventListener("click", ()=>{
+    IMP_ACTUAL=null; $("#impModal").classList.remove("open");
+  });
+  $("#btnImpConfirmar").addEventListener("click", confirmarImportacion);
+  $("#impModal").addEventListener("click", e=>{
+    if(e.target.id==="impModal"){ IMP_ACTUAL=null; $("#impModal").classList.remove("open"); }
+  });
+}
+
 /* Exportar catálogo actual a Excel (base para editar) */
 async function exportarProductosExcel(){
   const S=v=>({t:"s",v}), N=v=>({t:"n",v});
@@ -2477,6 +2943,7 @@ function initAdmin(){
 initAdmin();
 initHistorial();
 initServidor();
+initImportPedido();
 iniciarHistorial()
   .then(()=> initAuth())
   .then(()=>{ pintarHistorial(); pintarSyncBar(); sincronizar(); });
