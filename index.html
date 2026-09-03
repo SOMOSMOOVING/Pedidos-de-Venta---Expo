@@ -117,7 +117,7 @@
   .imp-fila{display:flex; gap:8px; font-size:12px; line-height:1.4; padding:5px 0;
             border-top:1px dashed var(--line);}
   .imp-fila:first-child{border-top:none;}
-  .imp-fila .f{flex:0 0 42px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .imp-fila .f{flex:0 0 64px; color:var(--muted); font-variant-numeric:tabular-nums; font-size:11px;}
   .imp-fila .d{flex:1 1 auto; min-width:0;}
   .imp-fila .q{flex:0 0 auto; font-weight:700; white-space:nowrap;}
   .imp-fila.mal .d{color:var(--danger);}
@@ -654,7 +654,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v13";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v14";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1533,9 +1533,24 @@ function cerrarScan(){
 /* ====== GENERADOR XLSX (sin librerías, funciona offline) ====== */
 function xmlEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function colName(n){ let s=""; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
-function sheetXML(rows, anchos){
+/* extra (todo opcional, se usa en la plantilla de pedido):
+     congelar    → cuántas filas quedan fijas al hacer scroll
+     autoFiltro  → rango con el embudo para filtrar, ej "A12:D1012"
+     validaciones→ [{ref:"B9", lista:"Clientes!$A$2:$A$50", titulo, aviso}]
+                   desplegable en una celda, tomando los valores de otra hoja.
+                   errorStyle="warning": si escriben algo que no está en la lista,
+                   avisa pero deja seguir (la lista puede quedar desactualizada).
+   El orden de los elementos importa: Excel no perdona sheetViews/cols/sheetData/
+   autoFilter/dataValidations fuera de secuencia. */
+function sheetXML(rows, anchos, extra){
+  extra = extra || {};
   let out='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  if(extra.congelar>0){
+    out+='<sheetViews><sheetView workbookViewId="0">'+
+      `<pane ySplit="${extra.congelar}" topLeftCell="A${extra.congelar+1}" activePane="bottomLeft" state="frozen"/>`+
+      '</sheetView></sheetViews>';
+  }
   if(anchos && anchos.length){
     out+="<cols>";
     anchos.forEach((w,i)=>{ out+=`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`; });
@@ -1557,16 +1572,33 @@ function sheetXML(rows, anchos){
     });
     out+="</row>";
   });
-  out+="</sheetData></worksheet>";
+  out+="</sheetData>";
+  if(extra.autoFiltro) out+=`<autoFilter ref="${extra.autoFiltro}"/>`;
+  const vals=extra.validaciones||[];
+  if(vals.length){
+    out+=`<dataValidations count="${vals.length}">`;
+    vals.forEach(v=>{
+      out+=`<dataValidation type="list" errorStyle="warning" allowBlank="1" showInputMessage="1" showErrorMessage="1"`+
+           ` sqref="${v.ref}" errorTitle="${xmlEsc(v.titulo||"Fuera de la lista")}"`+
+           ` error="${xmlEsc(v.aviso||"Ese valor no está en la lista. Si igual es correcto, tocá Sí.")}">`+
+           `<formula1>${v.lista}</formula1></dataValidation>`;
+    });
+    out+="</dataValidations>";
+  }
+  out+="</worksheet>";
   return out;
 }
-/* celdas: texto, número, plata, y sus versiones en negrita */
+/* celdas: texto, número, plata, y sus versiones en negrita.
+   CTH/CIN son para la plantilla: encabezado y celda a completar, con fondo
+   amarillo, para que se vea de un saque cuál es la columna que hay que llenar. */
 const CT  = v=>({t:"s",v:v});
 const CN  = v=>({t:"n",v:v});
 const CM  = v=>({t:"n",v:v,s:2});
 const CTB = v=>({t:"s",v:v,s:1});
 const CNB = v=>({t:"n",v:v,s:1});
 const CMB = v=>({t:"n",v:v,s:3});
+const CTH = v=>({t:"s",v:v,s:4});
+const CIN = ()=>({t:"s",v:"",s:5});
 /* tabla de CRC32, para poder calcularlo de a pedazos (streaming) */
 const CRC_TABLA=(()=>{ const t=new Uint32Array(256);
   for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c>>>1)^(0xEDB88320 & -(c&1)); t[n]=c>>>0; }
@@ -1741,14 +1773,17 @@ function piezasFijasXLSX(nombreHoja){
         '<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
         '<font><b/><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font>'+
       '</fonts>'+
-      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'+
+      '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'+
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill></fills>'+
       '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'+
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
-      '<cellXfs count="4">'+
+      '<cellXfs count="6">'+
         '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
         '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+
         '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'+
         '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'+
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'+
+        '<xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1"/>'+
       '</cellXfs>'+
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
       '</styleSheet>'
@@ -1767,6 +1802,50 @@ async function construirXLSX(rows, opts){
     {name:"xl/styles.xml", bytes:enc.encode(p.styles)},
     {name:"xl/worksheets/sheet1.xml", bytes:enc.encode(sheet)}
   ]);
+}
+/* ==========================================================================
+   EXCEL DE VARIAS HOJAS
+   --------------------------------------------------------------------------
+   Hace falta para la plantilla de pedido: el desplegable de cliente toma los
+   valores de una segunda hoja (un desplegable con la lista escrita adentro
+   de la celda tiene un tope de 255 caracteres, y son 761 clientes).
+     hojas = [{nombre, rows, anchos, congelar, autoFiltro, validaciones}]
+   ========================================================================== */
+async function construirXLSXVarias(hojas){
+  const enc=new TextEncoder();
+  const n=hojas.length;
+  const nombres=hojas.map((h,i)=>
+    String(h.nombre||("Hoja"+(i+1))).replace(/[\[\]:*?\/\\]/g,"").slice(0,31) || ("Hoja"+(i+1)));
+  const base=piezasFijasXLSX(nombres[0]);
+  const ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+    nombres.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")+
+    '</Types>';
+  const wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+nombres.map((nm,i)=>`<sheet name="${xmlEsc(nm)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")+
+    '</sheets></workbook>';
+  const wbRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    nombres.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")+
+    `<Relationship Id="rId${n+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`+
+    '</Relationships>';
+  const partes=[
+    {name:"[Content_Types].xml", bytes:enc.encode(ct)},
+    {name:"_rels/.rels", bytes:enc.encode(base.rels)},
+    {name:"xl/workbook.xml", bytes:enc.encode(wb)},
+    {name:"xl/_rels/workbook.xml.rels", bytes:enc.encode(wbRels)},
+    {name:"xl/styles.xml", bytes:enc.encode(base.styles)}
+  ];
+  hojas.forEach((h,i)=>{
+    partes.push({name:`xl/worksheets/sheet${i+1}.xml`,
+      bytes:enc.encode(sheetXML(h.rows, h.anchos, h))});
+  });
+  return await zipStore(partes);
 }
 
 /* ====== PEDIDO -> EXCEL ====== */
@@ -2537,8 +2616,13 @@ async function importarClientes(file, modo){
 
    Nada se guarda hasta que la persona ve el resumen y toca Confirmar.
    ========================================================================== */
-const IMP_COLS   = ["Código","Unidades"];
-const IMP_ANCHOS = [20,44];
+/* La plantilla trae el catálogo entero ya escrito (código, descripción y UMV) y
+   la persona solo pone BULTOS. Es la respuesta a los dos problemas reales:
+   nadie se acuerda los códigos, y nadie sabe de memoria la unidad mínima de
+   venta de cada producto. Pidiendo bultos, el múltiplo de UMV no puede fallar:
+   1 bulto = 1 UMV, y cualquier número entero sirve. */
+const IMP_COLS   = ["Código","Descripción","UMV (u/bulto)","Bultos a pedir"];
+const IMP_ANCHOS = [13,54,14,16];
 const IMP_MAX_RENGLONES = 5000;    // freno: una planilla más grande que esto es un error
 
 /* etiquetas que se aceptan en el bloque de cabecera */
@@ -2550,7 +2634,7 @@ const IMP_CLAVES = {
 /* títulos que se aceptan para cada columna de la tabla de artículos */
 const IMP_TIT_COD  = ["codigo","codigo producto","codigo de producto","cod","sku","articulo","art"];
 const IMP_TIT_UNI  = ["unidades","unidades a pedir","cantidad de unidades","u"];
-const IMP_TIT_PACK = ["cantidad umv","umv a pedir","bultos","cantidad de bultos","packs","cajas"];
+const IMP_TIT_PACK = ["bultos a pedir","bultos","cantidad umv","umv a pedir","cantidad de bultos","packs","cajas"];
 const IMP_TIT_CANT = ["cantidad","cant"];
 const IMP_TIT_EAN  = ["ean","codigo de barras","codigo barras","barcode"];
 
@@ -2560,44 +2644,109 @@ function normClave(v){ return norm(v).replace(/\s+/g," ").replace(/[\s:.]+$/,"")
 function celda(fila, i){ return String((fila && fila[i]!=null) ? fila[i] : "").trim(); }
 
 /* ---------- PLANTILLA ---------- */
+/* Hoja 2: la lista de clientes. Está para dos cosas: como referencia, y como
+   origen del desplegable de la hoja Pedido (un desplegable con los valores
+   escritos dentro de la celda no aguanta 761 nombres). */
+function filasClientes(){
+  const lista = CLIENTES.filter(c=>c.nombre && !/inactivo/i.test(c.nombre));
+  const rows = [[CTB("Cliente"), CTB("Zona")]];
+  lista.forEach(c=>rows.push([CT(c.nombre), CT(c.zona||"")]));
+  return {rows, n:lista.length};
+}
 async function descargarPlantillaPedido(){
-  const ej = PRODUCTOS[0];
-  const ejTxt = ej
-    ? `Por ejemplo, para el producto ${ej.codigo} la UMV es ${ej.umv}: van ${ej.umv}, ${ej.umv*2}, ${ej.umv*3}… unidades.`
-    : "";
+  const cli = filasClientes();
+  const ej  = PRODUCTOS[0];
+
   const rows = [
     [CTB("PLANTILLA DE PEDIDO — MOOVING")],
-    [CT("1) Completá Vendedor, Cliente y Comentarios en las celdas de al lado.")],
-    [CT("2) Abajo, una fila por producto: el código y cuántas UNIDADES (no bultos).")],
-    [CT("3) La cantidad tiene que ser múltiplo de la UMV del producto. "+ejTxt)],
-    [CT("No cambies los títulos Código y Unidades. La descripción y el precio los completa la app sola.")],
+    [CT("1) CLIENTE: tocá la celda de al lado y elegí de la lista desplegable (la flechita ▼). No hace falta escribirlo.")],
+    [CT("2) VENDEDOR: escribí tu nombre y apellido.")],
+    [CT("3) PRODUCTOS: abajo está el catálogo completo. Buscá el producto y poné cuántos BULTOS querés en la columna amarilla.")],
+    [CT("   Un bulto es la unidad mínima de venta. La columna UMV dice cuántas unidades tiene cada bulto: si dice "+
+        (ej?ej.umv:12)+", 1 bulto son "+(ej?ej.umv:12)+" unidades y 2 bultos son "+(ej?ej.umv*2:24)+".")],
+    [CT("   Poné números enteros: 1, 2, 3… No hace falta calcular unidades, eso lo hace la app.")],
+    [CT("4) Dejá vacías las filas de los productos que no pedís. Para encontrar un producto usá Buscar (la lupa) o el embudo del encabezado.")],
     [],
-    [CTB("Vendedor"),    CT("")],
-    [CTB("Cliente"),     CT("")],
-    [CTB("Comentarios"), CT("")],
-    [],
-    IMP_COLS.map(CTB)
+    [CTB("Vendedor"),    CIN()],
+    [CTB("Cliente"),     CIN()],
+    [CTB("Comentarios"), CIN()],
+    []
   ];
-  descargarBlob(await construirXLSX(rows, {hoja:"Pedido", anchos:IMP_ANCHOS}),
-                "plantilla_pedido_mooving.xlsx");
+  /* Las filas se calculan, no se hardcodean: si mañana se agrega o se saca un
+     renglón de instrucciones, el desplegable, el filtro y el panel fijo se
+     acomodan solos. Hardcodearlas ya me hizo desfasar todo una vez. */
+  const filaCliente = rows.findIndex(f=>f[0] && f[0].v==="Cliente") + 1;
+  const filaTabla   = rows.length + 1;
+  rows.push(IMP_COLS.map(CTH));
+  PRODUCTOS.forEach(p=>{
+    rows.push([CT(String(p.codigo)), CT(p.nombre), CN(p.umv), CIN()]);
+  });
+
+  const blob = await construirXLSXVarias([
+    { nombre:"Pedido", rows, anchos:IMP_ANCHOS,
+      congelar: filaTabla,
+      autoFiltro: `A${filaTabla}:D${filaTabla + PRODUCTOS.length}`,
+      validaciones: (cli.n && filaCliente>0) ? [{
+        ref:"B"+filaCliente,
+        lista:`Clientes!$A$2:$A$${cli.n+1}`,
+        titulo:"Ese cliente no está en la lista",
+        aviso:"No encontré ese nombre en la lista de clientes. Si igual es correcto, tocá Sí: el pedido entra, pero sin zona."
+      }] : []
+    },
+    { nombre:"Clientes", rows:cli.rows, anchos:[54,28], congelar:1, autoFiltro:`A1:B${cli.n+1}` }
+  ]);
+  descargarBlob(blob, "plantilla_pedido_mooving.xlsx");
 }
 
 /* ---------- LECTURA ---------- */
 /* Busca el renglón de títulos de la tabla de artículos. Tiene que tener una
-   columna de código Y una de cantidad: si no, no es el encabezado. */
+   columna de código Y una de cantidad: si no, no es el encabezado.
+
+   Cuando hay más de una columna de cantidad posible, se elige LA QUE TIENE
+   DATOS. Hace falta porque el Excel que genera la app trae "Cantidad UMV" y
+   "Unidades" a la vez (ahí gana Unidades, que es el dato fino), mientras que
+   la plantilla trae solo "Bultos a pedir". */
 function buscarEncabezadoItems(rows){
   const primero = (hdr, lista) => { for(const a of lista){ const j=hdr.indexOf(a); if(j>=0) return j; } return -1; };
   for(let r=0; r<rows.length; r++){
     const hdr = (rows[r]||[]).map(normClave);
     const colCod = primero(hdr, IMP_TIT_COD);
     if(colCod<0) continue;
-    let colCant = primero(hdr, IMP_TIT_UNI), porUMV = false;
-    if(colCant<0){ colCant = primero(hdr, IMP_TIT_PACK); porUMV = colCant>=0; }
-    if(colCant<0){ colCant = primero(hdr, IMP_TIT_CANT); }
-    if(colCant<0) continue;
+    const cU = primero(hdr, IMP_TIT_UNI);
+    const cP = primero(hdr, IMP_TIT_PACK);
+    const cC = primero(hdr, IMP_TIT_CANT);
+    if(cU<0 && cP<0 && cC<0) continue;
+    const conDatos = c => {
+      if(c<0) return 0;
+      let n=0;
+      for(let k=r+1; k<rows.length; k++) if(celda(rows[k], c)!=="") n++;
+      return n;
+    };
+    let colCant, porUMV=false;
+    if(conDatos(cU)>0)      { colCant=cU; }
+    else if(conDatos(cP)>0) { colCant=cP; porUMV=true; }
+    else if(conDatos(cC)>0) { colCant=cC; }
+    else {
+      // ninguna tiene datos: la planilla vino vacía. Igual devolvemos algo,
+      // para que el mensaje sea "no hay renglones" y no "no hay tabla".
+      colCant = cU>=0 ? cU : (cP>=0 ? cP : cC);
+      porUMV  = cU<0 && cP>=0;
+    }
     return { fila:r, colCod, colCant, porUMV, colEan:primero(hdr, IMP_TIT_EAN) };
   }
   return null;
+}
+/* Cuando el cliente escrito no coincide con ninguno, buscamos parecidos por
+   palabras para poder sugerirlos en la pantalla de revisión. */
+function clientesParecidos(nombre, max){
+  const palabras = norm(nombre).replace(/[^a-z0-9]+/g," ").split(" ").filter(w=>w.length>=4);
+  if(!palabras.length) return [];
+  return CLIENTES
+    .map(c=>{ const n=norm(c.nombre); let p=0; palabras.forEach(w=>{ if(n.indexOf(w)>=0) p++; }); return {c,p}; })
+    .filter(x=>x.p>0)
+    .sort((a,b)=>b.p-a.p)
+    .slice(0, max||3)
+    .map(x=>x.c.nombre);
 }
 /* Lee las etiquetas del bloque de arriba. El valor es la primera celda no
    vacía a la derecha de la etiqueta. */
@@ -2684,6 +2833,9 @@ async function leerPedidoDeExcel(file){
       problemas.push({fila:nFila, texto:`hay una cantidad (${cantTxt}) pero la celda de código está vacía`});
       continue;
     }
+    // La plantilla trae el catálogo entero: las filas sin cantidad son
+    // productos que no se pidieron. Se saltean en silencio, no son un error.
+    if(!cantTxt) continue;
     let prod = porCod.get(normCodigo(codTxt));
     if(!prod && eanTxt) prod = porEan.get(eanTxt);
     if(!prod && /^\d{8,14}$/.test(codTxt)) prod = porEan.get(codTxt);   // pusieron el EAN en la columna de código
@@ -2693,7 +2845,8 @@ async function leerPedidoDeExcel(file){
     }
     const u = normCantidad(cantTxt);
     if(u===null){
-      problemas.push({fila:nFila, texto:`${prod.codigo}: la cantidad "${cantTxt||"(vacía)"}" no es un número entero mayor que cero`});
+      problemas.push({fila:nFila, texto:`${prod.codigo}: "${cantTxt}" no es un número entero mayor que cero`+
+                                        (enc.porUMV?" de bultos":"")});
       continue;
     }
     const unidades = enc.porUMV ? u*prod.umv : u;
@@ -2713,9 +2866,6 @@ async function leerPedidoDeExcel(file){
   if(repetidos){
     avisos.push(`${repetidos} código(s) aparecían más de una vez: las cantidades se sumaron.`);
   }
-  if(enc.porUMV){
-    avisos.push("La planilla traía la cantidad en bultos (UMV), no en unidades: se multiplicó por la UMV de cada producto.");
-  }
 
   const lineas = Array.from(acum, ([codigo, unidades])=>{
     const p = PRODUCTOS.find(x=>x.codigo===codigo);
@@ -2726,10 +2876,15 @@ async function leerPedidoDeExcel(file){
 
   // cliente
   let cliente = cab.cliente, zona = "", clienteEnLista = false;
+  let parecidos = [];
   if(cliente){
     const c = clienteCanonico(cliente);
     if(c){ cliente = c.nombre; zona = c.zona||""; clienteEnLista = true; }
-    else avisos.push(`El cliente "${cliente}" no está en la lista: el pedido queda con ese nombre y sin zona.`);
+    else{
+      parecidos = clientesParecidos(cliente, 3);
+      avisos.push(`El cliente "${cliente}" no está en la lista: el pedido queda con ese nombre y sin zona.`+
+        (parecidos.length ? ` ¿Querían poner ${parecidos.map(x=>'"'+x+'"').join(" o ")}?` : ""));
+    }
   }else{
     avisos.push("La planilla no dice el cliente: el pedido queda como SIN CLIENTE.");
   }
@@ -2739,8 +2894,9 @@ async function leerPedidoDeExcel(file){
     archivo: file.name,
     vendedor: cab.vendedor,
     cliente: cliente || "",
-    clienteEnLista, zona,
+    clienteEnLista, zona, parecidos,
     comentarios: cab.comentarios,
+    enBultos: !!enc.porUMV,
     lineas, problemas, avisos,
     filaEncabezado: enc.fila+1,
     totalUnidades: lineas.reduce((s,x)=>s+x.unidades,0),
@@ -2759,10 +2915,13 @@ function pintarRevisionImport(res){
   let html =
     `<div class="imp-sum"><b>${n} artículo(s) listo(s) para importar</b>`+
     (mal?`<br><span style="color:var(--danger);font-weight:700">${mal} renglón(es) con problema, quedan afuera</span>`:"")+
-    `<br>${res.totalUnidades} unidades · ${res.totalUMV} UMV`+
+    `<br>${res.totalUMV} bulto(s) · ${res.totalUnidades} unidades`+
     (res.totalPesos>0?` · $ ${fmtPrecio(res.totalPesos)}`:"")+`</div>`;
 
   html += `<div class="imp-bloque">`+
+    dato("Cantidades", res.enBultos
+        ? "vinieron en <b>bultos</b>, la app calculó las unidades"
+        : "vinieron en <b>unidades</b>")+
     dato("Archivo", escH(res.archivo))+
     dato("Vendedor", res.vendedor
         ? escH(res.vendedor)
@@ -2788,12 +2947,13 @@ function pintarRevisionImport(res){
   if(n){
     const muestra = res.lineas.slice(0,200);
     html += `<div class="imp-bloque"><h4>Artículos que se van a importar</h4><div class="imp-lista">`+
-      muestra.map(x=>`<div class="imp-fila"><div class="f">${escH(x.codigo)}</div><div class="d">${escH(x.nombre)}</div><div class="q">${x.unidades} u.</div></div>`).join("")+
+      muestra.map(x=>`<div class="imp-fila"><div class="f">${escH(x.codigo)}</div><div class="d">${escH(x.nombre)}</div><div class="q">${x.packs} b. · ${x.unidades} u.</div></div>`).join("")+
       (res.lineas.length>muestra.length?`<div class="imp-fila"><div class="d">…y ${res.lineas.length-muestra.length} más</div></div>`:"")+
       `</div></div>`;
   }else{
     html += `<div class="empty">No hay ningún renglón válido para importar.<br><br>`+
-            `Revisá que los códigos existan en el catálogo y que las cantidades sean múltiplo de la UMV.</div>`;
+            `Revisá que la columna de cantidad esté completa en al menos un producto `+
+            `y que los códigos existan en el catálogo.</div>`;
   }
 
   $("#impBody").innerHTML = html;
