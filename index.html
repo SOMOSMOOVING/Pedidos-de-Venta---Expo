@@ -654,7 +654,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v14";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v15";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -2052,7 +2052,20 @@ async function descargarPedidoGuardado(id){
 /* carga un pedido guardado de vuelta en la pantalla para seguir editándolo */
 function reabrirPedido(id){
   const ped=pedidoPorId(id); if(!ped) return;
-  if(!confirm(`Reabrir el pedido de ${ped.cliente}?\n\nReemplaza lo que tengas cargado ahora.`)) return;
+  /* Un pedido viejo puede tener artículos que ya no están en el catálogo (se
+     discontinuaron). Esas líneas no se pueden reabrir, porque la pantalla
+     trabaja contra el catálogo actual. Antes desaparecían sin decir nada:
+     el pedido reabierto salía más chico y nadie se enteraba. */
+  const perdidas = ped.lineas.filter(x=>!PRODUCTOS.some(p=>p.codigo===x.codigo));
+  let extra = "";
+  if(perdidas.length){
+    extra = `\n\n⚠ ${perdidas.length} de ${ped.lineas.length} artículo(s) ya no están en el catálogo `+
+            `y NO se van a poder reabrir:\n` +
+            perdidas.slice(0,8).map(x=>`  · ${x.codigo} ${x.nombre}`).join("\n") +
+            (perdidas.length>8 ? `\n  · …y ${perdidas.length-8} más` : "") +
+            `\n\nEl pedido original queda intacto en el historial.`;
+  }
+  if(!confirm(`Reabrir el pedido de ${ped.cliente}?\n\nReemplaza lo que tengas cargado ahora.`+extra)) return;
   const cant={};
   ped.lineas.forEach(x=>{ cant[x.codigo]=x.unidades; });
   estado={cliente:ped.cliente, comentarios:ped.comentarios||"", cant};
@@ -2062,7 +2075,8 @@ function reabrirPedido(id){
   $("#buscar").value="";
   pintarZona(); pintarLista(); pintarResumen();
   $("#histModal").classList.remove("open");
-  toast(`Pedido de ${ped.cliente} reabierto`);
+  if(perdidas.length) toast(`Pedido reabierto sin ${perdidas.length} artículo(s) discontinuado(s)`, true);
+  else toast(`Pedido de ${ped.cliente} reabierto`);
 }
 /* ====== EXCEL CONSOLIDADO: todos los pedidos agrupados por cliente ====== */
 async function exportarConsolidado(){
@@ -2554,7 +2568,12 @@ function mapear(rows, campos){
 /* ====== IMPORTAR (combinar y actualizar) ====== */
 async function importarProductos(file, modo){
   const rows=await leerArchivo(file);
-  const idx=mapear(rows,{codigo:["codigo","cod"],nombre:["producto","nombre","descripcion","articulo"],umv:["umv"],
+  /* Los títulos vienen de distintos sistemas: el listado oficial de la empresa
+     sale con SKU / Product name / EAN / UMV / Precio, así que esos nombres
+     también se aceptan. Si mañana aparece otro, se agrega acá. */
+  const idx=mapear(rows,{codigo:["codigo","cod","sku","codigo sku","cod producto","codigo de producto"],
+    nombre:["producto","nombre","descripcion","articulo","product name","product","detalle","descripcion del producto"],
+    umv:["umv","unidad minima de venta","u por bulto","unidades por bulto"],
     ean:["ean","codigo de barras","barcode"],
     precio:["precio","precio unitario","precio unit","precio unit.","precio lista","importe","p unitario"]});
   if(idx.codigo<0||idx.nombre<0||idx.umv<0) throw new Error("faltan columnas Código, Producto o UMV");
