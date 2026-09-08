@@ -251,7 +251,24 @@
     display:inline-flex; align-items:center; gap:6px; min-width:0; padding:0 14px;
     background:var(--brand); white-space:nowrap;
   }
-  #scanArea{position:relative; background:#000; aspect-ratio:4/3; overflow:hidden;}
+  #scanArea{position:relative; background:#000; aspect-ratio:4/3; overflow:hidden; cursor:crosshair;}
+  .scan-ctl{display:flex; gap:8px; padding:0 16px 10px; flex-wrap:wrap; justify-content:center;}
+  .scan-ctl button{
+    font-size:12.5px; font-weight:700; padding:9px 12px; border-radius:9px;
+    border:1px solid var(--line); background:#f8f7fc; color:var(--brand-dark);
+  }
+  .scan-ctl button.on{background:var(--brand); border-color:var(--brand); color:#fff;}
+  /* marca donde el usuario tocó para enfocar */
+  .scan-punto{
+    position:absolute; width:58px; height:58px; margin:-29px 0 0 -29px;
+    border:2px solid #ffd200; border-radius:50%; pointer-events:none;
+    animation:enfoque .9s ease-out forwards;
+  }
+  @keyframes enfoque{
+    0%{transform:scale(1.4); opacity:0;}
+    25%{transform:scale(1); opacity:1;}
+    100%{transform:scale(1); opacity:0;}
+  }
   #scanVideo{width:100%; height:100%; object-fit:cover; display:block;}
   .scan-frame{
     position:absolute; inset:18% 10%; border:3px solid rgba(255,255,255,.9);
@@ -450,6 +467,11 @@
         <div class="scan-frame"></div>
       </div>
       <div id="scanMsg" class="scan-msg">Apuntá la cámara al código de barras…</div>
+      <div class="scan-ctl">
+        <button type="button" id="btnScanLuz" hidden>🔦 Luz</button>
+        <button type="button" id="btnScanZoom" hidden>🔍 Acercar</button>
+        <button type="button" id="btnScanManual">⌨ Escribir el código</button>
+      </div>
       <div id="scanLog"></div>
     </div>
     <div class="foot">
@@ -654,7 +676,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v15";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v16";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1419,26 +1441,183 @@ function onBuscarEnter(){
   }
 }
 
-/* ====== ESCÁNER DE CÁMARA ====== */
+/* ==========================================================================
+   ESCÁNER DE CÁMARA
+   --------------------------------------------------------------------------
+   Historia de por qué esto es más largo de lo que parece.
+
+   Al principio la cámara se pedía así:
+       getUserMedia({video:{facingMode:{ideal:"environment"}}})
+   y eso trae dos problemas que se ven como "este celular no enfoca":
+
+   1. SIN RESOLUCIÓN PEDIDA, el navegador entrega 640x480. Un EAN-13 ocupando
+      la mitad del ancho de un cuadro de 640 px deja las barras finas en poco
+      más de un píxel: el lector falla o tarda muchísimo. Pidiendo 1920 hay
+      tres veces más píxeles por barra y el mismo código entra al toque.
+
+   2. EN CELULARES CON VARIAS CÁMARAS TRASERAS, "environment" muchas veces
+      devuelve la GRAN ANGULAR. Esa lente no enfoca a menos de 10-15 cm por
+      física, no por software: si el vendedor acerca el celular al código,
+      nunca va a enfocar. Hay que pedir la trasera principal por su id.
+
+   Además ahora se pide enfoque continuo explícito, se puede tocar la pantalla
+   para re-enfocar (como en la cámara del celular), y hay linterna y zoom
+   cuando el equipo los soporta.
+
+   Lo que NO se puede arreglar desde acá: si el celular tiene la lente sucia,
+   rayada, o es de gama muy baja con enfoque fijo. Para esos casos está el
+   botón "Escribir el código".
+   ========================================================================== */
 let scanRunning=false, scanStream=null, scanDetector=null, zxingControls=null;
+let scanTrack=null, scanCaps={}, scanZoom=null, scanLuz=false;
 let lastScan={code:null, t:0}, scanCount=0;
+
+const MSG_SCAN = "Apuntá al código · a unos 15-20 cm · tocá la pantalla para enfocar";
+
+/* Nombres que delatan una lente que NO sirve para leer un código de cerca:
+   la gran angular no enfoca a 15 cm, y la tele/macro/profundidad tampoco son
+   la principal. Los nombres varían por marca e idioma, así que se descarta
+   por palabras y, si no queda ninguna, se usa la que haya. */
+function lenteNoSirve(label){
+  return /ultra|gran\s*angular|wide|0\.5|tele|macro|depth|profundidad|monochrom/i.test(label||"");
+}
+async function elegirCamaraTrasera(){
+  try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+    const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
+    if(ds.length<2) return null;                       // una sola cámara: no hay qué elegir
+    const traseras=ds.filter(d=>/back|rear|trasera|environment|posterior/i.test(d.label||""));
+    const base=traseras.length?traseras:ds;
+    const buena=base.filter(d=>!lenteNoSirve(d.label));
+    const elegida=buena[0]||base[0];
+    return elegida ? elegida.deviceId||null : null;
+  }catch(e){ return null; }
+}
+/* Cadena de intentos, de lo mejor a lo que seguro funciona. Si un celular no
+   puede con la resolución alta, no se queda sin escáner: baja un escalón. */
+function intentosDeVideo(deviceId){
+  const enfoque={focusMode:{ideal:"continuous"}};
+  const camara = deviceId ? {deviceId:{exact:deviceId}} : {facingMode:{ideal:"environment"}};
+  return [
+    Object.assign({}, camara, enfoque, {width:{ideal:1920}, height:{ideal:1080}}),
+    Object.assign({}, camara, enfoque, {width:{ideal:1280}, height:{ideal:720}}),
+    Object.assign({}, camara, enfoque),
+    {facingMode:{ideal:"environment"}}
+  ];
+}
+async function abrirCamara(deviceId){
+  let ultimo=null;
+  for(const video of intentosDeVideo(deviceId)){
+    try{ return await navigator.mediaDevices.getUserMedia({video, audio:false}); }
+    catch(e){ ultimo=e; }
+  }
+  throw ultimo || new Error("no se pudo abrir la cámara");
+}
+/* Con la cámara ya abierta se leen sus capacidades y se aplica lo que soporte.
+   Todo va en try/catch por separado: que un celular no tenga zoom no puede
+   dejar sin enfoque continuo al resto. */
+async function afinarCamara(){
+  scanTrack = scanStream ? (scanStream.getVideoTracks()[0]||null) : null;
+  scanCaps = {};
+  if(!scanTrack) return;
+  try{ if(scanTrack.getCapabilities) scanCaps = scanTrack.getCapabilities() || {}; }catch(e){}
+  const modos = scanCaps.focusMode || [];
+  if(modos.indexOf && modos.indexOf("continuous")>=0){
+    try{ await scanTrack.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
+  }
+  if(scanCaps.zoom && typeof scanCaps.zoom.min==="number"){
+    try{ const s=scanTrack.getSettings?scanTrack.getSettings():{}; scanZoom = s.zoom!=null ? s.zoom : scanCaps.zoom.min; }
+    catch(e){ scanZoom = scanCaps.zoom.min; }
+  }
+  pintarControlesScan();
+}
+function pintarControlesScan(){
+  const luz=$("#btnScanLuz"), zoom=$("#btnScanZoom");
+  if(luz){
+    luz.hidden = !scanCaps.torch;
+    luz.classList.toggle("on", !!scanLuz);
+    luz.textContent = scanLuz ? "🔦 Luz encendida" : "🔦 Luz";
+  }
+  if(zoom){
+    const puede = !!(scanCaps.zoom && scanCaps.zoom.max>scanCaps.zoom.min);
+    zoom.hidden = !puede;
+    const cerca = puede && scanZoom>scanCaps.zoom.min;
+    zoom.classList.toggle("on", !!cerca);
+    zoom.textContent = cerca ? "🔍 Alejar" : "🔍 Acercar";
+  }
+}
+/* Tocar la pantalla re-dispara el enfoque en ese punto y después vuelve al
+   continuo. Es el gesto que la gente ya conoce de la cámara del celular, y
+   resuelve el caso "se desenfocó y no vuelve solo". */
+async function enfocarEn(x, y){
+  if(!scanTrack) return;
+  const adv=[];
+  if(scanCaps.pointsOfInterest) adv.push({pointsOfInterest:[{x:x, y:y}]});
+  const modos=scanCaps.focusMode||[];
+  const puntual = modos.indexOf && modos.indexOf("single-shot")>=0;
+  if(puntual) adv.push({focusMode:"single-shot"});
+  if(!adv.length){ return; }
+  try{
+    await scanTrack.applyConstraints({advanced:adv});
+    $("#scanMsg").textContent="Enfocando…";
+    setTimeout(async ()=>{
+      if(modos.indexOf && modos.indexOf("continuous")>=0){
+        try{ await scanTrack.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
+      }
+      if(scanRunning) $("#scanMsg").textContent=MSG_SCAN;
+    }, 1200);
+  }catch(e){}
+}
+/* La linterna es lo que más cambia en un stand: con poca luz la cámara abre
+   el diafragma, pierde profundidad de campo y el enfoque se vuelve inestable. */
+async function alternarLuz(){
+  if(!scanTrack || !scanCaps.torch) return;
+  const nuevo=!scanLuz;
+  try{ await scanTrack.applyConstraints({advanced:[{torch:nuevo}]}); scanLuz=nuevo; }
+  catch(e){}
+  pintarControlesScan();
+}
+/* Acercar con el zoom de la cámara en vez de acercar el celular: el código
+   ocupa más píxeles SIN entrar en la distancia donde la lente no enfoca. */
+async function alternarZoom(){
+  if(!scanTrack || !scanCaps.zoom) return;
+  const min=scanCaps.zoom.min, max=scanCaps.zoom.max;
+  const objetivo = (scanZoom>min) ? min : Math.min(max, min*2 || 2);
+  try{ await scanTrack.applyConstraints({advanced:[{zoom:objetivo}]}); scanZoom=objetivo; }
+  catch(e){}
+  pintarControlesScan();
+}
+/* Si no hay caso con la cámara: cerrar y dejar el cursor en el buscador, que
+   ya encuentra por código de barras. Mejor una salida a mano que un vendedor
+   trabado apuntando a un código que no entra. */
+function escribirCodigoAMano(){
+  cerrarScan();
+  const b=$("#buscar");
+  if(b){ b.value=""; b.focus(); }
+  toast("Escribí o pegá el código de barras en el buscador");
+}
 
 async function abrirScan(){
   $("#scanModal").classList.add("open");
   $("#scanLog").innerHTML=""; scanCount=0;
   $("#scanMsg").textContent="Iniciando cámara…";
   scanRunning=true;
+  scanLuz=false; scanZoom=null; scanCaps={}; scanTrack=null;
+  pintarControlesScan();
   prepararAudio();   // iPhone: el audio solo se habilita dentro del toque del usuario
   const v=$("#scanVideo");
   if('BarcodeDetector' in window){
-    try{
-      scanStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}}});
-    }catch(e){ return scanError(e); }
+    let id=null;
+    try{ id=await elegirCamaraTrasera(); }catch(e){}
+    try{ scanStream = await abrirCamara(id); }
+    catch(e){ return scanError(e); }
+    if(!scanRunning){ scanStream.getTracks().forEach(t=>t.stop()); return; }
     v.srcObject=scanStream;
     try{ await v.play(); }catch(e){}
+    await afinarCamara();
     try{ scanDetector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); }
     catch(e){ scanDetector = new BarcodeDetector(); }
-    $("#scanMsg").textContent="Apuntá al código de barras…";
+    $("#scanMsg").textContent=MSG_SCAN;
     loopNative();
   } else {
     cargarZXing();
@@ -1446,7 +1625,7 @@ async function abrirScan(){
 }
 function scanError(e){
   scanRunning=false;
-  $("#scanMsg").innerHTML="No se pudo abrir la cámara.<br>Revisá los permisos, o que la página esté publicada con HTTPS (no funciona abriendo el archivo suelto).";
+  $("#scanMsg").innerHTML="No se pudo abrir la cámara.<br>Revisá los permisos, o que la página esté publicada con HTTPS (no funciona abriendo el archivo suelto).<br><br>Podés escribir el código de barras en el buscador.";
 }
 async function loopNative(){
   if(!scanRunning) return;
@@ -1456,17 +1635,58 @@ async function loopNative(){
   }catch(e){}
   if(scanRunning) setTimeout(loopNative, 220);
 }
+/* iPhone y cualquier navegador sin BarcodeDetector: ZXing desde el CDN.
+   Se le pasan dos pistas que cambian bastante la tasa de lectura, pero SOLO
+   si la librería las expone: restringir a EAN/UPC (no pierde tiempo probando
+   QR y veinte formatos más) y TRY_HARDER (busca el código rotado o parcial).
+   Si el bundle no las expone, arranca sin pistas y funciona como antes. */
+function pistasZXing(){
+  try{
+    const DH=ZXingBrowser.DecodeHintType, BF=ZXingBrowser.BarcodeFormat;
+    if(!DH || !BF) return null;
+    const h=new Map();
+    const fs=[BF.EAN_13,BF.EAN_8,BF.UPC_A,BF.UPC_E,BF.CODE_128].filter(f=>f!=null);
+    if(fs.length) h.set(DH.POSSIBLE_FORMATS, fs);
+    if(DH.TRY_HARDER!=null) h.set(DH.TRY_HARDER, true);
+    return h.size ? h : null;
+  }catch(e){ return null; }
+}
 function cargarZXing(){
   $("#scanMsg").textContent="Cargando lector…";
-  const start=()=>{
+  const start=async ()=>{
     try{
-      const reader = new ZXingBrowser.BrowserMultiFormatReader();
-      reader.decodeFromConstraints({video:{facingMode:{ideal:"environment"}}}, $("#scanVideo"), (result, err, controls)=>{
+      let id=null;
+      try{ id=await elegirCamaraTrasera(); }catch(e){}
+      const pistas=pistasZXing();
+      let reader;
+      try{ reader = pistas ? new ZXingBrowser.BrowserMultiFormatReader(pistas, 200)
+                           : new ZXingBrowser.BrowserMultiFormatReader(); }
+      catch(e){ reader = new ZXingBrowser.BrowserMultiFormatReader(); }
+      /* ZXing abre la cámara por su cuenta, así que la cadena de respaldo hay
+         que repetirla acá. Sin esto, si la cámara elegida no se puede abrir
+         con deviceId exact —pasa en iPhone, donde Safari no siempre lo
+         respeta— el escáner moría con "no se pudo abrir la cámara" en vez de
+         reintentar con la que el navegador quiera darnos. */
+      const cb=(result, err, controls)=>{
         zxingControls = controls;
         if(!scanRunning && controls){ controls.stop(); return; }
         if(result) onDetected(result.getText());
-      }).catch(scanError);
-      $("#scanMsg").textContent="Apuntá al código de barras…";
+      };
+      // 1280x720: ZXing decodifica por software; 1080p ahoga a los celulares viejos
+      const opciones=[ intentosDeVideo(id)[1], intentosDeVideo(null)[1], {facingMode:{ideal:"environment"}} ];
+      let arranco=false, ultimo=null;
+      for(const video of opciones){
+        if(!scanRunning) return;
+        try{
+          await reader.decodeFromConstraints({video, audio:false}, $("#scanVideo"), cb);
+          arranco=true; break;
+        }catch(e){ ultimo=e; }
+      }
+      if(!arranco) return scanError(ultimo);
+      // nos colgamos de su stream para ofrecer linterna, zoom y tocar-para-enfocar
+      const st=$("#scanVideo").srcObject;
+      if(st){ scanStream=st; await afinarCamara(); }
+      $("#scanMsg").textContent=MSG_SCAN;
     }catch(e){ scanError(e); }
   };
   if(window.ZXingBrowser){ start(); return; }
@@ -1523,10 +1743,20 @@ function beep(ok){
 }
 function cerrarScan(){
   scanRunning=false;
+  /* Apagar la linterna ANTES de cortar la cámara: si se corta el track con el
+     torch prendido, en algunos Android la luz queda encendida hasta que se
+     reinicia el teléfono. */
+  if(scanTrack && scanLuz){
+    try{ scanTrack.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
+  }
+  scanLuz=false; scanZoom=null; scanCaps={}; scanTrack=null;
   try{ if(zxingControls) zxingControls.stop(); }catch(e){}
   zxingControls=null;
   if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
-  $("#scanVideo").srcObject=null;
+  const v=$("#scanVideo");
+  if(v && v.srcObject){ try{ v.srcObject.getTracks().forEach(t=>t.stop()); }catch(e){} }
+  if(v) v.srcObject=null;
+  pintarControlesScan();
   $("#scanModal").classList.remove("open");
 }
 
@@ -3141,6 +3371,24 @@ $("#modal").addEventListener("click", e=>{ if(e.target.id==="modal") cerrarModal
 $("#btnScan").addEventListener("click", abrirScan);
 $("#btnScanCerrar").addEventListener("click", cerrarScan);
 $("#scanModal").addEventListener("click", e=>{ if(e.target.id==="scanModal") cerrarScan(); });
+$("#btnScanLuz").addEventListener("click", alternarLuz);
+$("#btnScanZoom").addEventListener("click", alternarZoom);
+$("#btnScanManual").addEventListener("click", escribirCodigoAMano);
+/* Tocar el video = enfocar ahí. Las coordenadas van de 0 a 1, que es lo que
+   espera pointsOfInterest. Se dibuja el círculo aunque el celular no soporte
+   el enfoque por punto: el usuario tiene que ver que su toque hizo algo. */
+$("#scanArea").addEventListener("pointerdown", e=>{
+  const area=$("#scanArea");
+  const r=area.getBoundingClientRect();
+  if(!r.width || !r.height) return;
+  const x=(e.clientX-r.left)/r.width, y=(e.clientY-r.top)/r.height;
+  const p=document.createElement("div");
+  p.className="scan-punto";
+  p.style.left=(x*100)+"%"; p.style.top=(y*100)+"%";
+  area.appendChild(p);
+  setTimeout(()=>p.remove(), 950);
+  enfocarEn(Math.min(1,Math.max(0,x)), Math.min(1,Math.max(0,y)));
+});
 
 // Cargar catálogo publicado (si existe) y recién ahí armar clientes/lista
 cargarCatalogo().then(()=>{ initClientes(); pintarLista(); pintarResumen(); });
