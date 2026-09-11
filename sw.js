@@ -1,19 +1,57 @@
 /* Service Worker — Pedidos Mooving (PWA con actualización automática) */
-const CACHE = "pedidos-mooving-v19";
+const CACHE = "pedidos-mooving-v21";
 const SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./productos.json",
   "./clientes.json",
+  "./fotos.json",
   "./icon-192.png",
   "./icon-512.png",
   "./apple-touch-icon.png"
 ];
 
+/* Las fotos de producto NO están en la lista de arriba: cuáles son lo dice
+   fotos.json, que puede cambiar sin tocar este archivo. Así que al instalarse
+   el Service Worker lo lee y se guarda todas las fotos que ahí figuren.
+
+   Por qué precargarlas y no dejar que se bajen al mirarlas: en la expo puede
+   no haber señal, y una foto que nunca se abrió no estaría en el caché. La
+   idea es que el vendedor abra la app una vez con internet en su casa y ya
+   tenga todo.
+
+   Nada de esto puede hacer fallar la instalación: si no hay fotos.json, si
+   está mal escrito o si falta una imagen, se sigue de largo. */
+async function guardarFotos(cache) {
+  try {
+    const r = await fetch("./fotos.json", { cache: "no-store" });
+    if (!r.ok) return 0;
+    const d = await r.json();
+    const carpeta = String((d && d.carpeta) || "fotos").replace(/\/+$/, "");
+    const archivos = new Set();
+    for (const m of [d && d.porCodigo, d && d.porNombre]) {
+      if (m && typeof m === "object") {
+        for (const k of Object.keys(m)) if (m[k]) archivos.add(String(m[k]));
+      }
+    }
+    if (!archivos.size) return 0;
+    const urls = [...archivos].map(a => "./" + (carpeta ? carpeta + "/" : "") + a);
+    const res = await Promise.allSettled(urls.map(u => cache.add(u)));
+    return res.filter(x => x.status === "fulfilled").length;
+  } catch (e) { return 0; }
+}
+
 self.addEventListener("install", e => {
   // no fallar la instalación si algún archivo opcional no está
-  e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled(SHELL.map(u => c.add(u)))).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(async c => {
+        await Promise.allSettled(SHELL.map(u => c.add(u)));
+        await guardarFotos(c);
+      })
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", e => {

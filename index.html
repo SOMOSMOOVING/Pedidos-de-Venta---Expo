@@ -245,7 +245,38 @@
     font-weight:700; font-size:13px; padding:5px 10px; border-radius:20px;
   }
   .zona.nomatch{background:#fff4e5; color:var(--danger);}
+  /* Cabecera del pedido: cliente + botón de comentario en una sola línea. */
+  .ped-head{padding:10px;}
+  .ph-row{display:flex; align-items:center; gap:8px;}
+  .ph-row .ac-wrap{flex:1; min-width:0;}
+  .ph-com{
+    flex:0 0 auto; width:46px; height:46px; border-radius:10px;
+    border:1px solid var(--line); background:#fff; font-size:19px; line-height:1;
+    position:relative;
+  }
+  .ph-com:active{background:#f3edff;}
+  .ph-com.lleno{background:#f3edff; border-color:var(--brand);}
+  /* el puntito avisa que hay un comentario escrito aunque esté cerrado */
+  .ph-com.lleno::after{
+    content:""; position:absolute; top:6px; right:6px; width:8px; height:8px;
+    border-radius:50%; background:var(--brand);
+  }
+  #comentBox{margin-top:8px;}
+  #comentBox textarea{min-height:56px;}
+  .ped-head .zona{margin-top:8px;}
+
+  /* BUSCADOR FIJO
+     Se queda pegado abajo del encabezado. En la expo el vendedor escribe,
+     mira, borra y vuelve a escribir decenas de veces; antes tenía que subir
+     con el dedo hasta arriba de todo para cambiar la búsqueda.
+     --hdr-h la calcula el JS, porque el encabezado cambia de alto cuando
+     aparece la barra de "pedidos sin subir". */
   .search{margin-bottom:10px; display:flex; gap:8px;}
+  .wrap > .search{
+    position:sticky; top:var(--hdr-h, 92px); z-index:15;
+    background:var(--bg); padding:8px 0; margin-top:-8px;
+    box-shadow:0 8px 8px -8px rgba(90,24,201,.22);
+  }
   .search input{flex:1;}
   .btn.scan{
     display:inline-flex; align-items:center; gap:6px; min-width:0; padding:0 14px;
@@ -287,14 +318,69 @@
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
   .toast.err{background:var(--danger);}
   .prod{
-    display:flex; align-items:center; gap:10px; padding:12px;
     background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:8px;
+    overflow:hidden;
   }
+  .fila-top{display:flex; align-items:center; gap:10px; padding:11px 12px;}
+  /* Pie de la fila: solo existe con cantidad cargada. La cantidad a la
+     izquierda, el importe a la derecha y sin partirse nunca. */
+  .fila-pie{
+    display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+    padding:7px 12px; background:#f3edff; border-top:1px solid var(--line);
+    font-size:12.5px; color:var(--brand-dark);
+  }
+  .fila-pie b{font-size:15px; font-weight:800; white-space:nowrap;}
+  .fila-pie b.ok{color:var(--ok);}
+  .fila-pie.mal{background:#fff4e5; color:var(--danger); border-top-color:#f0d9b0;}
+  .fila-pie.mal b{font-size:12.5px; font-weight:700;}
   .prod.active{border-color:var(--brand); box-shadow:0 0 0 2px rgba(31,111,235,.15);}
   .prod .info{flex:1; min-width:0;}
+  /* Miniatura de la foto del producto. Solo se dibuja si ese producto tiene
+     foto cargada, así que en la mayoría de las filas no ocupa nada. */
+  .prod .thumb{
+    flex:0 0 auto; width:48px; height:48px; padding:0; overflow:hidden;
+    border:1px solid var(--line); border-radius:9px; background:#faf9fd;
+    display:flex; align-items:center; justify-content:center; position:relative;
+  }
+  .prod .thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+  .prod .thumb::after{
+    content:"⤢"; position:absolute; right:0; bottom:0;
+    background:rgba(123,47,247,.92); color:#fff; font-size:9px; line-height:1;
+    padding:2px 3px; border-radius:5px 0 8px 0;
+  }
+  .prod .thumb:active{border-color:var(--brand);}
+  /* Visor de la foto */
+  #fotoModal .sheet{max-width:520px;}
+  .foto-caja{
+    background:#0d0d12; display:flex; align-items:center; justify-content:center;
+    min-height:200px; max-height:58vh; overflow:hidden;
+  }
+  .foto-caja img{max-width:100%; max-height:58vh; display:block; object-fit:contain;}
+  .foto-err{padding:26px 16px; text-align:center; color:var(--muted); font-size:13.5px; line-height:1.5;}
+  .foto-info{padding:12px 16px 4px;}
+  .foto-info h3{margin:0; font-size:15.5px; line-height:1.3;}
+  .foto-info p{margin:3px 0 0; font-size:12.5px; color:var(--muted);}
+  .foto-cargar{display:flex; align-items:center; gap:10px; padding:10px 16px 14px;}
+  .foto-cargar button{
+    width:46px; height:46px; border-radius:11px; border:1px solid var(--line);
+    background:#fff; font-size:22px; font-weight:700; color:var(--brand); line-height:1;
+  }
+  .foto-cargar button:active{background:#f3edff;}
+  .foto-cant{flex:1; text-align:center; font-size:14px; font-weight:700; color:var(--muted);}
+  .foto-cant.ok{color:var(--ok);}
   .prod .code{font-size:12px; color:var(--muted); font-weight:600;}
   .prod .name{font-size:15px; font-weight:600; line-height:1.25; margin:1px 0;}
-  .prod .umv{font-size:12px; color:var(--muted);}
+  /* La línea chica bajo el nombre: "1 UMV = 6 u." y, si hay precio, el
+     unitario. Van como dos piezas separadas que pueden caer una debajo de la
+     otra en pantallas angostas, pero NINGUNA de las dos se parte por dentro:
+     sin esto, con precios reales de 2027 el renglón se cortaba justo entre
+     el "$" y el número, que es lo peor que puede pasar con un precio. */
+  .prod .umv{
+    font-size:12px; color:var(--muted);
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px;
+  }
+  .prod .umv > span{white-space:nowrap;}
+  .prod .umv .pu{font-weight:700; color:var(--brand-dark);}
   .stepper{display:flex; flex-direction:column; align-items:flex-end; gap:4px;}
   .qtyrow{display:flex; align-items:center; gap:6px;}
   .qtyrow button{
@@ -307,6 +393,15 @@
     border:1px solid var(--line); border-radius:10px; padding:11px 4px;
   }
   .qty.bad{border-color:var(--danger); background:#fff4e5; color:var(--danger);}
+  /* En 360 px el nombre del producto queda en dos renglones porque el
+     casillero de cantidad se lleva 158 px. Achicarlo 24 px alcanza para que
+     "Cartuchera 1 Piso AFA" entre en uno solo. El botón sigue midiendo más
+     de 44 px de alto, que es lo que importa para tocarlo con el dedo. */
+  @media (max-width:380px){
+    .qty{width:60px; font-size:17px;}
+    .qtyrow button{width:32px;}
+    .qtyrow{gap:4px;}
+  }
   .prod .units{font-size:11px; font-weight:700; margin-top:3px; text-align:right;}
   .prod .units.ok{color:var(--ok);}
   .prod .units.bad{color:var(--danger);}
@@ -417,33 +512,26 @@
 </header>
 
 <div class="wrap">
-  <div class="card">
-    <label for="cliente">Cliente</label>
-    <div class="ac-wrap">
-      <input type="text" id="cliente" autocomplete="off" autocapitalize="characters"
-             placeholder="Escribí parte del nombre…">
-      <div id="clienteResults" class="ac-results"></div>
+  <!-- CABECERA DEL PEDIDO
+       Antes eran dos tarjetas (Cliente y Comentarios) que juntas ocupaban
+       230 px de pantalla: en un celular de 360 px no entraban ni 3 productos.
+       Ahora es una sola tarjeta. El comentario vive detrás del botón 💬, que
+       se marca cuando hay algo escrito, porque en la mayoría de los pedidos
+       ese campo queda vacío y no tiene por qué ocupar lugar siempre. -->
+  <div class="card ped-head">
+    <div class="ph-row">
+      <div class="ac-wrap">
+        <input type="text" id="cliente" autocomplete="off" autocapitalize="characters"
+               placeholder="Cliente: escribí parte del nombre…" aria-label="Cliente">
+        <div id="clienteResults" class="ac-results"></div>
+      </div>
+      <button type="button" id="btnComent" class="ph-com" title="Comentarios del pedido"
+              aria-label="Comentarios del pedido">💬</button>
     </div>
     <div id="zonaBox"></div>
-  </div>
-
-  <div class="card">
-    <label for="comentarios">Comentarios / Observaciones</label>
-    <textarea id="comentarios" rows="3" placeholder="Notas del pedido, condiciones, fecha de entrega…"></textarea>
-  </div>
-
-  <!-- Importar un pedido que vino cargado en Excel (para quien no usa la app).
-       No toca el pedido que estés armando en pantalla: entra como un pedido aparte. -->
-  <div class="card imp-card">
-    <div class="imp-txt">
-      <b>Pedido cargado en Excel</b>
-      <span>Para quien no usa la app</span>
+    <div id="comentBox" hidden>
+      <textarea id="comentarios" rows="2" placeholder="Notas del pedido, condiciones, fecha de entrega…"></textarea>
     </div>
-    <div class="imp-btns">
-      <button class="btn ghost" id="btnPlantilla" title="Descargar la plantilla de pedido en Excel">⬇ Plantilla</button>
-      <button class="btn" id="btnImportar" title="Importar un pedido desde un Excel">⬆ Importar</button>
-    </div>
-    <input type="file" id="fileImp" accept=".xlsx,.csv" style="display:none">
   </div>
 
   <div class="search">
@@ -487,6 +575,21 @@
   <div class="sheet">
     <h2>Historial de pedidos</h2>
     <div class="body">
+      <!-- Importar un pedido que vino cargado en Excel (para quien no usa la app).
+           No toca el pedido que estés armando en pantalla: entra como un pedido aparte.
+           Vive acá adentro y no en la pantalla principal porque lo usan 2 personas
+           de 10, y en la pantalla principal le sacaba lugar a la lista de productos. -->
+      <div class="card imp-card">
+        <div class="imp-txt">
+          <b>Pedido cargado en Excel</b>
+          <span>Para quien no usa la app</span>
+        </div>
+        <div class="imp-btns">
+          <button class="btn ghost" id="btnPlantilla" title="Descargar la plantilla de pedido en Excel">⬇ Plantilla</button>
+          <button class="btn" id="btnImportar" title="Importar un pedido desde un Excel">⬆ Importar</button>
+        </div>
+        <input type="file" id="fileImp" accept=".xlsx,.csv" style="display:none">
+      </div>
       <div id="histBody"></div>
       <div class="hst-estado">
         <button id="btnEstado" type="button">🔧 Estado de la app</button>
@@ -566,6 +669,36 @@
       </div>
     </div>
     <div class="foot"><button class="btn ghost" id="btnAdmCerrar" style="flex:1">Cerrar</button></div>
+  </div>
+</div>
+
+<!-- Visor de la foto del producto. Sirve para distinguir artículos que a simple
+     vista son iguales: las cartucheras no tienen el código ni el nombre de la
+     forma a la vista. Se puede cargar la cantidad desde acá. -->
+<div class="modal" id="fotoModal">
+  <div class="sheet">
+    <h2>Foto del producto</h2>
+    <div class="body" style="padding:0">
+      <div class="foto-caja">
+        <img id="fotoImg" src="" alt="">
+        <div class="foto-err" id="fotoError" style="display:none">
+          No se pudo cargar la foto.<br>
+          Si es la primera vez que abrís la app, entrá una vez con internet para que se descarguen.
+        </div>
+      </div>
+      <div class="foto-info">
+        <h3 id="fotoNombre"></h3>
+        <p id="fotoDatos"></p>
+      </div>
+      <div class="foto-cargar">
+        <button type="button" id="fotoMenos" title="Restar 1 UMV">−</button>
+        <span class="foto-cant" id="fotoCant">sin cargar</span>
+        <button type="button" id="fotoMas" title="Sumar 1 UMV">+</button>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn" id="btnFotoCerrar" style="flex:1">Listo</button>
+    </div>
   </div>
 </div>
 
@@ -676,7 +809,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v17";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v19";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1150,7 +1283,7 @@ async function sincronizar(manual){
 function pintarSyncBar(estado){
   const bar=$("#syncBar"); if(!bar) return;
   const n=pendientes().length;
-  if(!sesion || n===0){ bar.classList.add("oculto"); return; }
+  if(!sesion || n===0){ bar.classList.add("oculto"); medirHeader(); return; }
   bar.classList.remove("oculto");
   const txt=$("#syncTxt"), btn=$("#syncBtn");
   if(estado==="subiendo"){ txt.textContent=`Subiendo ${n} pedido(s)…`; btn.style.display="none"; return; }
@@ -1158,6 +1291,7 @@ function pintarSyncBar(estado){
     ? `${n} pedido(s) sin subir al servidor`
     : `Sin internet · ${n} pedido(s) en espera`;
   btn.style.display = navigator.onLine ? "" : "none";
+  medirHeader();
 }
 
 function initClientes(){
@@ -1209,10 +1343,28 @@ function pintarZona(){
   if(!nom){ box.innerHTML = ""; return; }
   if(existeCliente(nom)){
     const z = zonaDe(nom);
-    box.innerHTML = `<span class="zona">Zona: ${z || "sin zona"}</span>`;
+    // varias zonas del padrón ya se llaman "Zona ..."; no repetir la palabra
+    const et = z ? (/^zona\b/i.test(z) ? z : "Zona: " + z) : "Sin zona";
+    box.innerHTML = `<span class="zona">${et}</span>`;
   } else {
     box.innerHTML = `<span class="zona nomatch">⚠ Elegí un cliente de la lista</span>`;
   }
+}
+
+/* El botón 💬 tiene que avisar que hay un comentario aunque esté cerrado:
+   si no, alguien escribe "entregar después del 20" y al rato no hay forma de
+   saber, mirando la pantalla, que ese pedido lleva una nota. */
+function pintarComent(){
+  const b = $("#btnComent");
+  if(b) b.classList.toggle("lleno", !!(($("#comentarios").value)||"").trim());
+}
+
+/* El buscador queda pegado abajo del encabezado, pero el encabezado no mide
+   siempre lo mismo: cuando hay pedidos sin subir aparece la barra amarilla y
+   crece. Así que lo medimos de verdad en vez de poner un número fijo. */
+function medirHeader(){
+  const h = document.querySelector("header");
+  if(h) document.documentElement.style.setProperty("--hdr-h", h.offsetHeight + "px");
 }
 
 function setUnidades(code, units){
@@ -1251,22 +1403,31 @@ function pintarLista(){
   cont.innerHTML = (aviso ? `<div class="aviso">${escH(aviso)}</div>` : "") + items.map(p=>{
     const units = estado.cant[p.codigo] || 0;
     const valido = units>0 && units % p.umv === 0;
+    /* La miniatura solo aparece si ese producto tiene foto. loading="lazy" para
+       que el celular no decodifique 150 imágenes de golpe al buscar. */
+    const foto = fotoDe(p);
+    const thumb = foto
+      ? `<button type="button" class="thumb" data-foto="${escH(p.codigo)}" title="Ver la foto de ${escH(p.nombre)}" aria-label="Ver la foto de ${escH(p.nombre)}"><img src="${escH(foto)}" alt="" loading="lazy" decoding="async"></button>`
+      : "";
     return `
       <div class="prod ${valido?'active':''}" data-row="${escH(p.codigo)}">
-        <div class="info">
-          <div class="code">${escH(p.codigo)}</div>
-          <div class="name">${escH(p.nombre)}</div>
-          <div class="umv">1 UMV = ${p.umv} unidades${precioDe(p)>0?` · $ ${fmtPrecio(precioDe(p))} c/u`:""}</div>
-          <div class="units">${textoHint(p, units)}</div>
-        </div>
-        <div class="stepper">
-          <div class="qtyrow">
-            <button type="button" data-code="${escH(p.codigo)}" data-d="-1" title="Restar 1 UMV">−</button>
-            <input class="qty ${units>0&&!valido?'bad':''}" type="number" inputmode="numeric" min="0"
-                   step="${p.umv}" data-code="${escH(p.codigo)}" value="${units>0?units:''}" placeholder="0">
-            <button type="button" data-code="${escH(p.codigo)}" data-d="1" title="Sumar 1 UMV">+</button>
+        <div class="fila-top">
+          ${thumb}
+          <div class="info">
+            <div class="code">${escH(p.codigo)}</div>
+            <div class="name">${escH(p.nombre)}</div>
+            <div class="umv"><span>1 UMV = ${p.umv} u.</span>${precioDe(p)>0?`<span class="pu">$ ${fmtPrecio(precioDe(p))} c/u</span>`:""}</div>
+          </div>
+          <div class="stepper">
+            <div class="qtyrow">
+              <button type="button" data-code="${escH(p.codigo)}" data-d="-1" title="Restar 1 UMV">−</button>
+              <input class="qty ${units>0&&!valido?'bad':''}" type="number" inputmode="numeric" min="0"
+                     step="${p.umv}" data-code="${escH(p.codigo)}" value="${units>0?units:''}" placeholder="0">
+              <button type="button" data-code="${escH(p.codigo)}" data-d="1" title="Sumar 1 UMV">+</button>
+            </div>
           </div>
         </div>
+        ${pieFila(p, units)}
       </div>`;
   }).join("");
 
@@ -1280,11 +1441,7 @@ function pintarLista(){
       const p = PRODUCTOS.find(x=>x.codigo===code);
       if(!p) return;
       const d = parseInt(b.getAttribute("data-d"),10);
-      const cur = estado.cant[code] || 0;
-      // llevar al múltiplo y mover una UMV
-      const base = Math.round(cur / p.umv) * p.umv;
-      setUnidades(code, base + d*p.umv);
-      const nuevo = estado.cant[code] || 0;
+      const nuevo = ajustarUMV(code, d);
       const el = b.parentNode.querySelector("input.qty");
       if(el) el.value = nuevo>0 ? nuevo : "";
       refrescarFila(code);
@@ -1294,6 +1451,14 @@ function pintarLista(){
     // así el toque no se pierde si venías de escribir en otro producto.
     if(window.PointerEvent) b.addEventListener("pointerdown", aplicar);
     else b.addEventListener("click", aplicar);
+  });
+
+  // miniaturas: abren la foto grande
+  cont.querySelectorAll("button.thumb").forEach(bt=>{
+    bt.addEventListener("click", e=>{
+      e.preventDefault(); e.stopPropagation();
+      abrirFoto(bt.getAttribute("data-foto"));
+    });
   });
 
   // entrada directa de unidades
@@ -1323,15 +1488,30 @@ function pintarLista(){
 }
 
 /* texto del cartel de unidades de una fila */
-function textoHint(p, units){
+/* ==========================================================================
+   EL PIE DE LA FILA
+   --------------------------------------------------------------------------
+   Solo existe cuando el producto tiene cantidad cargada, así una búsqueda de
+   150 productos sin cargar queda con filas bajas y entran más en pantalla.
+
+   Está separado del resto a propósito. Antes el total de la línea iba pegado
+   con un "·" a la cantidad, todo en 11px: con precios de verdad
+   ("24 u. = 4 UMV · $ 881.243,76") eso se partía en dos renglones en un
+   celular de 360px, y cortaba justo entre el "$" y el número. Ahora la
+   cantidad va a la izquierda, el importe a la derecha y sin partirse nunca,
+   que es el número que el vendedor mira con el cliente enfrente.
+   ========================================================================== */
+function pieFila(p, units){
   if(!(units>0)) return "";
-  if(units % p.umv === 0){
-    const pr=precioDe(p);
-    return `${units} u. = ${units/p.umv} UMV ✓` + (pr>0 ? ` · $ ${fmtPrecio(units*pr)}` : "");
+  if(units % p.umv !== 0){
+    const bajo = Math.floor(units/p.umv)*p.umv;
+    const alto = bajo + p.umv;
+    return `<div class="fila-pie mal"><span>No es múltiplo de ${p.umv}</span>`+
+           `<b>Válido: ${bajo>0?bajo+" o ":""}${alto} u.</b></div>`;
   }
-  const bajo = Math.floor(units/p.umv)*p.umv;
-  const alto = bajo + p.umv;
-  return `No es múltiplo de ${p.umv}. Válido: ${bajo>0?bajo+" o ":""}${alto} u.`;
+  const pr = precioDe(p);
+  return `<div class="fila-pie"><span>${units/p.umv} UMV = ${units} u.</span>`+
+         (pr>0 ? `<b>$ ${fmtPrecio(units*pr)}</b>` : `<b class="ok">✓</b>`)+`</div>`;
 }
 function cssEsc(s){ return String(s).replace(/["\\]/g,"\\$&"); }
 /* actualiza SOLO una fila, sin volver a dibujar la lista (así no se pierden los toques) */
@@ -1343,8 +1523,11 @@ function refrescarFila(code){
   const u = estado.cant[code] || 0;
   const valido = u>0 && u % p.umv === 0;
   row.classList.toggle("active", valido);
-  const h = row.querySelector(".units");
-  if(h){ h.textContent = textoHint(p, u); h.className = "units " + (u>0 ? (valido?"ok":"bad") : ""); }
+  // el pie aparece y desaparece según haya cantidad, sin redibujar la fila entera
+  const viejo = row.querySelector(".fila-pie");
+  if(viejo) viejo.remove();
+  const html = pieFila(p, u);
+  if(html) row.insertAdjacentHTML("beforeend", html);
   const inp = row.querySelector("input.qty");
   if(inp) inp.classList.toggle("bad", u>0 && !valido);
 }
@@ -1382,6 +1565,7 @@ function vaciarPedido(){
   estado = {cliente:"", comentarios:"", cant:{}}; guardar();
   $("#cliente").value = ""; $("#comentarios").value = "";
   $("#buscar").value = "";
+  $("#comentBox").hidden = true; pintarComent();
   pintarZona(); pintarLista(); pintarResumen(); cerrarModal();
 }
 
@@ -1408,6 +1592,18 @@ function abrirModal(){
 function cerrarModal(){ $("#modal").classList.remove("open"); }
 
 /* ====== AGREGAR / TOAST ====== */
+/* Mueve la cantidad de un producto en ±1 UMV, partiendo del múltiplo más
+   cercano (así una cantidad mal tipeada se acomoda en vez de quedar inválida).
+   Lo usan los botones +/− de la fila y también el visor de fotos: una sola
+   implementación, para que no se comporten distinto. */
+function ajustarUMV(code, d){
+  const p = PRODUCTOS.find(x=>x.codigo===code);
+  if(!p) return 0;
+  const cur = estado.cant[code] || 0;
+  const base = Math.round(cur / p.umv) * p.umv;
+  setUnidades(code, base + d*p.umv);
+  return estado.cant[code] || 0;
+}
 function agregarUMV(p){
   const cur = estado.cant[p.codigo] || 0;
   const base = Math.round(cur / p.umv) * p.umv; // normaliza a múltiplo
@@ -2302,6 +2498,7 @@ function reabrirPedido(id){
   guardar();
   $("#cliente").value=ped.cliente;
   $("#comentarios").value=ped.comentarios||"";
+  $("#comentBox").hidden = !(ped.comentarios||"").trim(); pintarComent();
   $("#buscar").value="";
   pintarZona(); pintarLista(); pintarResumen();
   $("#histModal").classList.remove("open");
@@ -2708,6 +2905,125 @@ function initServidor(){
 async function cargarCatalogo(){
   try{ const r=await fetch("productos.json",{cache:"no-store"}); if(r.ok){ const d=await r.json(); if(Array.isArray(d)&&d.length) PRODUCTOS=d; } }catch(e){}
   try{ const r=await fetch("clientes.json",{cache:"no-store"}); if(r.ok){ const d=await r.json(); if(Array.isArray(d)&&d.length) CLIENTES=d; } }catch(e){}
+  await cargarFotos();
+}
+
+/* ==========================================================================
+   FOTOS DE PRODUCTO
+   --------------------------------------------------------------------------
+   Para qué: en la expo hay artículos que no se pueden distinguir mirándolos.
+   El caso concreto son las cartucheras: hay 246, pero lo que cambia entre
+   ellas es la FORMA (EVA, Doble EVA, 1 Piso, 2 Pisos, Cuádruple, Trend, Tubo,
+   Box, Slim, Wide, Rectangular, Dúo, Open!, University, Japan, Triple) y eso
+   no está escrito en el producto ni tiene el código a la vista. La licencia
+   (Harry Potter, Hello Kitty) sí se ve, así que no ayuda a decidir.
+
+   Cómo funciona: un índice `fotos.json` dice qué archivo le toca a cada
+   producto. Si un producto tiene foto, en su fila aparece una miniatura, y
+   tocándola se abre grande sin salir de la app.
+
+     {
+       "carpeta": "fotos",
+       "soloFamilias": ["Cartuchera"],
+       "porCodigo": { "152022927": "152022927.webp" },
+       "porNombre": { "cartuchera doble eva": "cartuchera-doble-eva.webp" }
+     }
+
+   `porCodigo` es lo específico y gana siempre. `porNombre` es el respaldo por
+   forma: una sola foto sirve para todas las variantes de esa forma. Entre
+   varias coincidencias de nombre gana LA MÁS LARGA, para que
+   "cartuchera doble eva" le gane a "cartuchera eva".
+
+   `soloFamilias` limita la función a esas familias de producto (se compara
+   contra el principio del nombre). Está porque la foto se pidió para un
+   problema puntual —las cartucheras, que no se distinguen a simple vista— y
+   no para llenar de imágenes el resto del catálogo. Si algún día se quiere
+   extender, se saca esa línea del índice: no hay que tocar la app.
+
+   Todo es opcional: sin `fotos.json` la app funciona igual y no se ve ninguna
+   miniatura. Así se pueden ir agregando fotos de a poco sin republicar la app.
+   ========================================================================== */
+let FOTOS = {carpeta:"fotos", soloFamilias:[], porCodigo:{}, porNombre:[]};
+const FOTO_CACHE = new Map();     // codigo -> archivo | null (para no recalcular por fila)
+
+async function cargarFotos(){
+  try{
+    const r = await fetch("fotos.json", {cache:"no-store"});
+    if(!r.ok) return;
+    const d = await r.json();
+    if(!d || typeof d!=="object") return;
+    FOTOS = {
+      carpeta: (d.carpeta || "fotos").replace(/\/+$/,""),
+      soloFamilias: (Array.isArray(d.soloFamilias) ? d.soloFamilias : [])
+        .map(norm).filter(Boolean),
+      porCodigo: d.porCodigo || {},
+      // ordenadas de la clave más larga a la más corta: la primera que coincide gana
+      porNombre: Object.keys(d.porNombre || {})
+        .map(k=>({clave:norm(k), archivo:d.porNombre[k]}))
+        .filter(x=>x.clave && x.archivo)
+        .sort((a,b)=>b.clave.length-a.clave.length)
+    };
+    FOTO_CACHE.clear();
+  }catch(e){ /* sin índice de fotos la app sigue igual */ }
+}
+/* Devuelve la URL de la foto de un producto, o null si no tiene. */
+function fotoDe(p){
+  if(!p) return null;
+  if(FOTO_CACHE.has(p.codigo)) return FOTO_CACHE.get(p.codigo);
+  // la función está limitada a las familias del índice (hoy, solo cartucheras)
+  if(FOTOS.soloFamilias.length){
+    const n = norm(p.nombre);
+    if(!FOTOS.soloFamilias.some(f=>n.startsWith(f))){ FOTO_CACHE.set(p.codigo, null); return null; }
+  }
+  let archivo = FOTOS.porCodigo[p.codigo] || FOTOS.porCodigo[String(p.codigo)] || null;
+  if(!archivo && FOTOS.porNombre.length){
+    const n = norm(p.nombre);
+    const hit = FOTOS.porNombre.find(x=>n.indexOf(x.clave)>=0);
+    if(hit) archivo = hit.archivo;
+  }
+  const url = archivo ? (FOTOS.carpeta ? FOTOS.carpeta+"/"+archivo : archivo) : null;
+  FOTO_CACHE.set(p.codigo, url);
+  return url;
+}
+function hayFotos(){ return FOTOS.porNombre.length>0 || Object.keys(FOTOS.porCodigo).length>0; }
+
+/* ---------- visor ---------- */
+let FOTO_ABIERTA = null;          // código del producto que se está mirando
+
+function abrirFoto(codigo){
+  const p = PRODUCTOS.find(x=>x.codigo===codigo);
+  const url = fotoDe(p);
+  if(!p || !url) return;
+  FOTO_ABIERTA = codigo;
+  $("#fotoImg").src = url;
+  $("#fotoImg").alt = p.nombre;
+  $("#fotoNombre").textContent = p.nombre;
+  $("#fotoDatos").textContent = `${p.codigo} · 1 UMV = ${p.umv} unidades`;
+  $("#fotoError").style.display = "none";
+  $("#fotoImg").style.display = "";
+  pintarFotoCant();
+  $("#fotoModal").classList.add("open");
+}
+function cerrarFoto(){
+  FOTO_ABIERTA = null;
+  $("#fotoModal").classList.remove("open");
+  $("#fotoImg").src = "";          // libera memoria en celulares justos
+}
+/* La cantidad se puede cargar desde el visor: si estás comparando dos formas,
+   lo natural es sumarla ahí mismo y no volver a buscar la fila. */
+function pintarFotoCant(){
+  if(!FOTO_ABIERTA) return;
+  const p = PRODUCTOS.find(x=>x.codigo===FOTO_ABIERTA); if(!p) return;
+  const u = estado.cant[p.codigo] || 0;
+  $("#fotoCant").textContent = u>0 ? `${u} u. = ${u/p.umv} UMV` : "sin cargar";
+  $("#fotoCant").className = u>0 ? "foto-cant ok" : "foto-cant";
+}
+function fotoAjustar(d){
+  if(!FOTO_ABIERTA) return;
+  ajustarUMV(FOTO_ABIERTA, d);
+  refrescarFila(FOTO_ABIERTA);     // si la fila está dibujada, que se vea al cerrar
+  pintarResumen();
+  pintarFotoCant();
 }
 
 /* ====== LECTOR .xlsx / .csv EN EL NAVEGADOR ====== */
@@ -3213,6 +3529,8 @@ function pintarRevisionImport(res){
   const b = $("#btnImpConfirmar");
   b.disabled = n===0;
   b.textContent = n ? `Confirmar (${n})` : "Confirmar";
+  // la revisión sale del modal del historial: lo cerramos para no apilar dos
+  $("#histModal").classList.remove("open");
   $("#impModal").classList.add("open");
 }
 
@@ -3275,10 +3593,11 @@ function initImportPedido(){
   });
   $("#btnImpCancelar").addEventListener("click", ()=>{
     IMP_ACTUAL=null; $("#impModal").classList.remove("open");
+    $("#histModal").classList.add("open");
   });
   $("#btnImpConfirmar").addEventListener("click", confirmarImportacion);
   $("#impModal").addEventListener("click", e=>{
-    if(e.target.id==="impModal"){ IMP_ACTUAL=null; $("#impModal").classList.remove("open"); }
+    if(e.target.id==="impModal"){ IMP_ACTUAL=null; $("#impModal").classList.remove("open"); $("#histModal").classList.add("open"); }
   });
 }
 
@@ -3361,7 +3680,18 @@ iniciarHistorial()
   .then(()=> initAuth())
   .then(()=>{ pintarHistorial(); pintarSyncBar(); sincronizar(); });
 $("#comentarios").value = estado.comentarios || "";
-$("#comentarios").addEventListener("input", ()=>{ estado.comentarios = $("#comentarios").value; guardar(); });
+$("#comentarios").addEventListener("input", ()=>{ estado.comentarios = $("#comentarios").value; guardar(); pintarComent(); });
+$("#btnComent").addEventListener("click", ()=>{
+  const caja = $("#comentBox");
+  const abrir = caja.hidden;
+  caja.hidden = !abrir;
+  if(abrir) $("#comentarios").focus();
+});
+pintarComent();
+if((estado.comentarios||"").trim()) $("#comentBox").hidden = false;
+medirHeader();
+addEventListener("resize", medirHeader);
+addEventListener("orientationchange", medirHeader);
 $("#buscar").addEventListener("input", pintarLista);
 $("#buscar").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); onBuscarEnter(); } });
 $("#btnVer").addEventListener("click", abrirModal);
@@ -3375,6 +3705,18 @@ $("#modal").addEventListener("click", e=>{ if(e.target.id==="modal") cerrarModal
 $("#btnScan").addEventListener("click", abrirScan);
 $("#btnScanCerrar").addEventListener("click", cerrarScan);
 $("#scanModal").addEventListener("click", e=>{ if(e.target.id==="scanModal") cerrarScan(); });
+/* Visor de fotos */
+$("#btnFotoCerrar").addEventListener("click", cerrarFoto);
+$("#fotoModal").addEventListener("click", e=>{ if(e.target.id==="fotoModal") cerrarFoto(); });
+$("#fotoMenos").addEventListener("click", ()=>fotoAjustar(-1));
+$("#fotoMas").addEventListener("click", ()=>fotoAjustar(1));
+/* Si la imagen no está (no se descargó, se borró del repo), se dice, no se deja
+   un recuadro negro vacío. */
+$("#fotoImg").addEventListener("error", ()=>{
+  if(!FOTO_ABIERTA) return;
+  $("#fotoImg").style.display = "none";
+  $("#fotoError").style.display = "";
+});
 $("#btnScanLuz").addEventListener("click", alternarLuz);
 $("#btnScanZoom").addEventListener("click", alternarZoom);
 $("#btnScanManual").addEventListener("click", escribirCodigoAMano);
