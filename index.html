@@ -840,7 +840,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v20";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v21";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1743,11 +1743,46 @@ async function abrirCamara(deviceId){
 /* Con la cámara ya abierta se leen sus capacidades y se aplica lo que soporte.
    Todo va en try/catch por separado: que un celular no tenga zoom no puede
    dejar sin enfoque continuo al resto. */
+/* Lo que la cámara dijo la última vez que se abrió. Se guarda para poder
+   mostrarlo en "Estado de la app": si en un celular no aparece el botón de la
+   linterna, esto dice si el problema es que el teléfono no la expone o que
+   somos nosotros. Sin este dato, "no me aparece" no se puede diagnosticar. */
+let SCAN_ULTIMO = null;
+
+/* IMPORTANTE — por qué se releen las capacidades varias veces:
+   en Android, getCapabilities() NO devuelve `torch` hasta que la cámara
+   terminó de arrancar del todo. Leerlo una sola vez, apenas empieza el video,
+   funciona en celulares lentos y FALLA en los rápidos con varias lentes
+   traseras: se llega antes de que el dato exista, y el botón de la linterna
+   queda escondido para siempre aunque el teléfono la tenga.
+   Pasó en un Galaxy S23 Ultra. Por eso se vuelve a mirar durante unos
+   segundos: cada relectura solo puede AGREGAR botones, nunca sacarlos. */
+const REINTENTOS_CAPS = [250, 600, 1200, 2000, 3000];
+
+function leerCapacidades(){
+  if(!scanTrack) return;
+  let c={};
+  try{ if(scanTrack.getCapabilities) c = scanTrack.getCapabilities() || {}; }catch(e){}
+  // fusionar: si una lectura trae algo nuevo, se suma; nunca se pierde lo que ya había
+  scanCaps = Object.assign({}, scanCaps, c);
+  let s={}; try{ s = scanTrack.getSettings ? scanTrack.getSettings() : {}; }catch(e){}
+  SCAN_ULTIMO = {
+    etiqueta: scanTrack.label || "(sin nombre)",
+    torch: !!scanCaps.torch,
+    zoom: !!(scanCaps.zoom && scanCaps.zoom.max>scanCaps.zoom.min),
+    enfoque: (scanCaps.focusMode||[]).join?.(", ") || "—",
+    resolucion: (s.width&&s.height) ? `${s.width}x${s.height}` : "—",
+    claves: Object.keys(scanCaps).sort().join(", ") || "(ninguna)"
+  };
+  pintarControlesScan();
+}
+
 async function afinarCamara(){
   scanTrack = scanStream ? (scanStream.getVideoTracks()[0]||null) : null;
   scanCaps = {};
   if(!scanTrack) return;
-  try{ if(scanTrack.getCapabilities) scanCaps = scanTrack.getCapabilities() || {}; }catch(e){}
+  leerCapacidades();
+  REINTENTOS_CAPS.forEach(ms=>setTimeout(()=>{ if(scanRunning && scanTrack) leerCapacidades(); }, ms));
   const modos = scanCaps.focusMode || [];
   if(modos.indexOf && modos.indexOf("continuous")>=0){
     try{ await scanTrack.applyConstraints({advanced:[{focusMode:"continuous"}]}); }catch(e){}
@@ -3005,6 +3040,17 @@ async function revisarEstado(){
   html+=fila("Sos admin", esAdmin() ? si("sí") : no("no"));
   if(!esAdmin()) arreglos.push("Tu mail no está en la tabla <b>admins</b> de Supabase, o está escrito distinto.");
   html+=fila("En este celular", `${historial().length} pedido(s), ${pendientes().length} sin subir`);
+  /* Diagnóstico de la cámara: se llena al abrir el escáner una vez. Sirve para
+     saber, en un celular concreto, por qué no aparece el botón de la linterna. */
+  if(SCAN_ULTIMO){
+    html+=fila("Cámara usada", escH(SCAN_ULTIMO.etiqueta)+` · ${escH(SCAN_ULTIMO.resolucion)}`);
+    html+=fila("Linterna", SCAN_ULTIMO.torch ? si("sí") : no("el celular no la ofrece"));
+    html+=fila("Zoom", SCAN_ULTIMO.zoom ? si("sí") : no("no"));
+    html+=fila("Enfoque", escH(SCAN_ULTIMO.enfoque));
+    html+=fila("La cámara informa", escH(SCAN_ULTIMO.claves));
+  } else {
+    html+=fila("Cámara", "abrí el escáner una vez y volvé acá");
+  }
 
   if(!navigator.onLine){
     box.innerHTML = html + `<div class="arreglo">Sin internet no se puede revisar el servidor.</div>`;
