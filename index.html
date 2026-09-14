@@ -185,7 +185,23 @@
     border:1px solid var(--line); background:#f8f7fc; color:var(--muted); font-family:inherit;
   }
   .adm-tabs button.on{background:var(--brand); color:#fff; border-color:var(--brand);}
-  .srv-row{border:1px solid var(--line); border-radius:11px; padding:10px 12px; margin-bottom:8px;}
+  /* La fila del panel del administrador se toca para abrir el pedido. Tiene
+     que NOTARSE que se puede tocar: sin la flechita, nadie descubre que hay
+     algo abajo. El área táctil es la fila entera, no un botoncito. */
+  .srv-row{
+    border:1px solid var(--line); border-radius:11px; padding:10px 12px; margin-bottom:8px;
+    cursor:pointer; position:relative; padding-right:26px; -webkit-tap-highlight-color:transparent;
+  }
+  .srv-row::after{
+    content:"›"; position:absolute; right:11px; top:50%; transform:translateY(-50%);
+    color:var(--brand); font-size:22px; font-weight:700; line-height:1;
+  }
+  .srv-row:active{background:#f3edff; border-color:var(--brand);}
+  /* el detalle de un pedido del servidor */
+  .det-meta{font-size:13px; color:var(--ink); margin-bottom:4px;}
+  .det-meta b{color:var(--brand-dark);}
+  .det-aviso{background:#fff4e5; border:1px solid #f0d9b0; color:var(--danger);
+    border-radius:10px; padding:9px 11px; font-size:12.5px; font-weight:600; margin-bottom:10px;}
   .srv-top{display:flex; justify-content:space-between; gap:8px; align-items:baseline;}
   .srv-cli{font-size:13.5px; font-weight:700; line-height:1.25; min-width:0;}
   .srv-tot{font-size:13.5px; font-weight:700; white-space:nowrap;}
@@ -624,6 +640,21 @@
   </div>
 </div>
 
+<!-- Un pedido del servidor, abierto desde la lista del administrador.
+     Se abre ENCIMA de la lista (no la reemplaza) para volver exactamente
+     donde estabas, con el filtro y el scroll intactos. -->
+<div class="modal" id="srvDetModal">
+  <div class="sheet">
+    <h2 id="srvDetTit">Pedido</h2>
+    <div class="body" id="srvDetBody"></div>
+    <div class="foot">
+      <button class="btn ghost" id="btnSrvDetVolver" style="flex:1 1 0; min-width:0; padding:12px 6px">Volver</button>
+      <button class="btn ghost" id="btnSrvDetAnular" style="flex:1 1 0; min-width:0; padding:12px 6px">Anular</button>
+      <button class="btn" id="btnSrvDetXls" style="flex:1 1 0; min-width:0; padding:12px 6px">⬇ Excel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Administración -->
 <div class="modal" id="admModal">
   <div class="sheet">
@@ -809,7 +840,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v19";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v20";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -2657,7 +2688,7 @@ function pintarPedidosServidor(){
       const d=new Date(p.fecha);
       const p2=n=>String(n).padStart(2,"0");
       const f=isNaN(d)?"":`${p2(d.getDate())}/${p2(d.getMonth()+1)}/${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
-      return `<div class="srv-row ${p.anulado?"anul":""}">
+      return `<div class="srv-row ${p.anulado?"anul":""}" data-id="${escH(String(p.id||""))}" role="button" tabindex="0">
         <div class="srv-top">
           <div class="srv-cli">${p.anulado?`<span class="tag-anul">ANULADO</span> `:""}${p.importado?`<span class="tag-imp">IMPORTADO</span> `:""}${escH(p.cliente||"")}</div>
           <div class="srv-tot">${p.total_unidades||0} u.${Number(p.total_pesos)>0?`<br>$ ${fmtPrecio(p.total_pesos)}`:""}</div>
@@ -2672,6 +2703,168 @@ function pintarPedidosServidor(){
       </div>`;
     }).join(""));
 }
+/* ==========================================================================
+   VER UN PEDIDO DEL SERVIDOR (administrador)
+   --------------------------------------------------------------------------
+   Por qué hace falta pedirle algo más al servidor:
+   la lista de "Pedidos de todo el equipo" se trae SIN el campo `lineas`, que
+   es el más pesado de la tabla. Con 1300 pedidos de 550 artículos, traerlo
+   sería la diferencia entre medio megabyte y diez, y la pantalla tardaría una
+   eternidad en abrir. Así que los renglones se piden de a un pedido, solo
+   cuando alguien lo abre. Es una consulta chica y se siente instantánea.
+
+   Se cachean en PED_CACHE: volver a abrir el mismo pedido no vuelve a pedir
+   nada, que es lo que pasa cuando uno revisa varios seguidos y vuelve atrás.
+   ========================================================================== */
+const PED_CACHE = new Map();
+let SRV_DET = null;              // el pedido abierto ahora
+
+async function traerPedidoCompleto(id){
+  if(PED_CACHE.has(id)) return PED_CACHE.get(id);
+  const t=await tokenValido();
+  if(!t){ const e=new Error("no se pudo validar la sesión"); e.sesion=true; throw e; }
+  const r=await fetch(`${SB_URL}/rest/v1/pedidos?select=*&id=eq.${encodeURIComponent(id)}`,
+    {headers:{apikey:SB_KEY, Authorization:"Bearer "+t}});
+  if(!r.ok){
+    let d=""; try{ d=(await r.text()).slice(0,200); }catch(x){}
+    throw new Error(`el servidor respondió ${r.status}${d?" — "+d:""}`);
+  }
+  const l=await r.json();
+  if(!Array.isArray(l) || !l.length) throw new Error("ese pedido ya no está en el servidor");
+  PED_CACHE.set(id, l[0]);
+  return l[0];
+}
+
+/* La fila del servidor viene con los nombres de la base (snake_case) y el
+   Excel espera los del pedido local. Este es el único lugar donde se traduce:
+   así el generador de Excel sigue siendo uno solo para las dos pantallas. */
+function pedidoDesdeServidor(p){
+  const l=(p.lineas||[]).map(x=>({
+    codigo:String(x.codigo||""), nombre:x.nombre||"", umv:Number(x.umv)||0,
+    packs:Number(x.packs)|| (Number(x.umv)? Number(x.unidades)/Number(x.umv) : 0),
+    unidades:Number(x.unidades)||0, precio:Number(x.precio)||0,
+    total:Number(x.total)|| (Number(x.unidades)||0)*(Number(x.precio)||0)
+  }));
+  return {
+    cliente:p.cliente||"", zona:p.zona||"", vendedor:p.vendedor_nombre||p.vendedor_email||"",
+    fecha:fechaCortaISO(p.fecha), fechaISO:p.fecha, comentarios:p.comentarios||"",
+    lineas:l,
+    totalUnidades:p.total_unidades!=null?Number(p.total_unidades):l.reduce((s,x)=>s+x.unidades,0),
+    totalUMV:p.total_umv!=null?Number(p.total_umv):l.reduce((s,x)=>s+x.packs,0),
+    totalPesos:p.total_pesos!=null?Number(p.total_pesos):l.reduce((s,x)=>s+x.total,0),
+    anulado:!!p.anulado, anuladoISO:p.anulado_en, anuladoMotivo:p.anulado_motivo||"",
+    importado:!!p.importado, vendedorOrigen:p.vendedor_origen||"", importadoArchivo:p.importado_archivo||""
+  };
+}
+
+async function abrirDetalleServidor(id){
+  $("#srvDetModal").classList.add("open");
+  $("#srvDetTit").textContent="Pedido";
+  $("#srvDetBody").innerHTML=`<div class="empty">Buscando el pedido…</div>`;
+  $("#btnSrvDetXls").disabled=true; $("#btnSrvDetAnular").disabled=true;
+  SRV_DET=null;
+  if(!navigator.onLine){
+    $("#srvDetBody").innerHTML=`<div class="empty">Sin internet.<br>Los artículos del pedido se leen del servidor.</div>`;
+    return;
+  }
+  try{
+    const p=await traerPedidoCompleto(id);
+    SRV_DET=p;
+    pintarDetalleServidor(p);
+  }catch(e){
+    $("#srvDetBody").innerHTML = e.sesion
+      ? `<div class="empty">No se pudo validar la sesión.<br>Cerrá sesión y volvé a entrar.</div>`
+      : `<div class="empty">No se pudo abrir el pedido.<br><br><span style="color:#d9480f;font-weight:700">${escH(e.message)}</span></div>`;
+  }
+}
+
+function pintarDetalleServidor(p){
+  const d=pedidoDesdeServidor(p);
+  $("#srvDetTit").textContent = d.cliente || "Pedido";
+  $("#btnSrvDetXls").disabled=false;
+  $("#btnSrvDetAnular").disabled=!!d.anulado;
+  $("#btnSrvDetAnular").textContent = d.anulado ? "Anulado" : "Anular";
+  let h="";
+  if(d.anulado){
+    h+=`<div class="det-aviso">PEDIDO ANULADO el ${escH(fechaCortaISO(d.anuladoISO))}`+
+       (d.anuladoMotivo?` — “${escH(d.anuladoMotivo)}”`:"")+`</div>`;
+  }
+  h+=`<div class="det-meta">Cliente: <b>${escH(d.cliente||"—")}</b></div>`;
+  h+=`<div class="det-meta">Zona: <b>${escH(d.zona||"sin zona")}</b></div>`;
+  h+=`<div class="det-meta">Vendedor: <b>${escH(d.importado?(d.vendedorOrigen||"no vino en la planilla"):d.vendedor)}</b>`+
+     (d.importado?` · importado por ${escH(d.vendedor)}`:"")+`</div>`;
+  if(d.importado && d.importadoArchivo) h+=`<div class="det-meta">Archivo: <b>${escH(d.importadoArchivo)}</b></div>`;
+  h+=`<div class="det-meta">Fecha: <b>${escH(d.fecha||"")}</b></div>`;
+  if(d.comentarios) h+=`<div class="det-meta">Comentarios: <b>${escH(d.comentarios)}</b></div>`;
+  h+=`<div style="height:10px"></div>`;
+  if(!d.lineas.length){
+    h+=`<div class="empty">Este pedido no tiene artículos guardados.</div>`;
+  }else{
+    h+=d.lineas.map(x=>`
+      <div class="line">
+        <div class="l"><div class="code">${escH(x.codigo)}</div>${escH(x.nombre)}<br>
+          <span class="code">${x.packs} UMV × ${x.umv} u.${x.precio>0?` · $ ${fmtPrecio(x.precio)} c/u`:""}</span></div>
+        <div class="r">${x.unidades} u.${x.precio>0?`<br><span style="font-weight:600">$ ${fmtPrecio(x.total)}</span>`:""}</div>
+      </div>`).join("");
+    h+=`<div class="line"><div class="l"><b>TOTAL</b></div><div class="r">${d.totalUMV} UMV · ${d.totalUnidades} u.`+
+       (d.totalPesos>0?`<br>$ ${fmtPrecio(d.totalPesos)}`:"")+`</div></div>`;
+  }
+  $("#srvDetBody").innerHTML=h;
+}
+
+async function descargarPedidoServidor(){
+  if(!SRV_DET) return;
+  const b=$("#btnSrvDetXls"), t=b.textContent;
+  b.disabled=true; b.textContent="…";
+  try{
+    const d=pedidoDesdeServidor(SRV_DET);
+    descargarBlob(await excelDeUnPedido(d),
+      `pedido_${nombreArchivoSeguro(d.cliente)}_${String(d.fechaISO||"").slice(0,10)}.xlsx`);
+  }catch(e){ alert("No se pudo armar el Excel.\n\n"+e.message); }
+  b.disabled=false; b.textContent=t;
+}
+
+/* Anular desde el panel: el pedido no es de este celular, así que no se toca
+   el historial local — se marca directo en el servidor. La base solo deja
+   hacerlo al administrador (el trigger pedidos_control). */
+async function anularPedidoServidor(){
+  if(!SRV_DET || SRV_DET.anulado) return;
+  const d=pedidoDesdeServidor(SRV_DET);
+  if(!confirm(`¿Anular el pedido de ${d.cliente}?\n\n`+
+              `No se borra: queda registrado como anulado, con la fecha y el motivo.`)) return;
+  let motivo=""; try{ motivo=prompt("Motivo de la anulación (opcional):","")||""; }catch(e){}
+  const b=$("#btnSrvDetAnular"), t=b.textContent;
+  b.disabled=true; b.textContent="Anulando…";
+  try{
+    const tok=await tokenValido();
+    if(!tok) throw new Error("no se pudo validar la sesión");
+    const cuerpo={anulado:true, anulado_en:new Date().toISOString(),
+                  anulado_motivo:motivo.trim().slice(0,300)};
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?id=eq.${encodeURIComponent(SRV_DET.id)}`,{
+      method:"PATCH",
+      headers:{apikey:SB_KEY, Authorization:"Bearer "+tok,
+               "Content-Type":"application/json", Prefer:"return=representation"},
+      body:JSON.stringify(cuerpo)});
+    if(!r.ok){
+      let x=""; try{ x=(await r.text()).slice(0,200); }catch(e){}
+      throw new Error(`el servidor respondió ${r.status}${x?" — "+x:""}`);
+    }
+    const l=await r.json();
+    const nuevo = (Array.isArray(l)&&l.length) ? l[0] : Object.assign({}, SRV_DET, cuerpo);
+    SRV_DET=nuevo; PED_CACHE.set(String(nuevo.id), nuevo);
+    // que la lista de atrás quede igual, sin tener que recargar del servidor
+    const i=SRV_PEDIDOS.findIndex(x=>String(x.id)===String(nuevo.id));
+    if(i>=0) Object.assign(SRV_PEDIDOS[i], cuerpo);
+    pintarDetalleServidor(nuevo); pintarPedidosServidor();
+    toast("Pedido anulado");
+  }catch(e){
+    alert("No se pudo anular el pedido.\n\n"+e.message+
+          "\n\nSi dice que falta una columna, corré supabase-migracion-v10.sql.");
+    b.disabled=false;
+  }
+  b.textContent = SRV_DET && SRV_DET.anulado ? "Anulado" : t;
+}
+
 /* Excel de todo lo que hay en el servidor, agrupado por cliente */
 /* ==========================================================================
    EXCEL DEL ADMINISTRADOR
@@ -2899,6 +3092,22 @@ function initServidor(){
     $("#srvModal").classList.add("open");
     traerPedidosServidor();
   });
+
+  /* Tocar una fila abre el pedido. Va por delegación en el contenedor, no fila
+     por fila: la lista se redibuja con cada tecla del filtro y volver a colgar
+     300 escuchadores en cada redibujado es justo lo que hace que un celular
+     viejo se sienta lento. */
+  $("#srvBody").addEventListener("click", e=>{
+    const fila=e.target.closest(".srv-row");
+    if(!fila) return;
+    const id=fila.getAttribute("data-id");
+    if(id) abrirDetalleServidor(id);
+  });
+  const cerrarDet = ()=> $("#srvDetModal").classList.remove("open");
+  $("#btnSrvDetVolver").addEventListener("click", cerrarDet);
+  $("#srvDetModal").addEventListener("click", e=>{ if(e.target.id==="srvDetModal") cerrarDet(); });
+  $("#btnSrvDetXls").addEventListener("click", descargarPedidoServidor);
+  $("#btnSrvDetAnular").addEventListener("click", anularPedidoServidor);
 }
 
 /* ====== CATÁLOGO EXTERNO (todos los celulares) ====== */
