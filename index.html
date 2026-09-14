@@ -230,6 +230,13 @@
     .hdr-titles h1{font-size:13.5px;}
     #btnSalir{font-size:11px; padding:6px 9px;}
   }
+  /* ATENCIÓN — esto tiene que estar sí o sí.
+     El atributo `hidden` esconde un elemento con la regla `[hidden]{display:none}`
+     del navegador, que es de baja prioridad: CUALQUIER regla nuestra que fije
+     `display` en ese elemento le gana y el `hidden` deja de funcionar, en
+     silencio. Pasó con #vaciarBox (display:flex): se marcaba como oculto y se
+     seguía viendo. Con esta línea, `hidden` gana siempre. */
+  [hidden]{display:none !important;}
   .rainbow{height:4px; background:var(--grad);}
   .wrap{padding:12px;}
   .card{
@@ -276,6 +283,29 @@
   .ph-com.lleno::after{
     content:""; position:absolute; top:6px; right:6px; width:8px; height:8px;
     border-radius:50%; background:var(--brand);
+  }
+  /* En un solo renglón siempre: la zona se achica si hace falta, el botón no.
+     Si se permitiera el wrap, un nombre de zona largo empujaría el botón a un
+     renglón nuevo y la lista de productos arrancaría 37 px más abajo. */
+  .ph-pie{display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:nowrap;}
+  .ph-pie > #zonaBox{min-width:0; overflow:hidden;}
+  .ph-pie .zona{max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #vaciarBox{margin-top:8px; display:flex; justify-content:flex-end; margin-left:auto;}
+  /* En reposo es solo el tacho: ocupa poco y no compite con nada. El texto
+     completo aparece recién cuando pide confirmación, que es cuando importa
+     que se lea bien. */
+  #btnVaciarRapido{
+    background:#fff; border:1px solid var(--line); color:var(--muted);
+    font-family:inherit; font-size:13px; font-weight:700;
+    /* el mismo alto que la etiqueta de zona de al lado (5px+13px+5px+bordes),
+       para que el botón no agregue ni un píxel a la altura del renglón */
+    padding:5px 10px; border-radius:20px; line-height:1.3; white-space:nowrap;
+  }
+  #btnVaciarRapido:active{background:#f3edff;}
+  /* Armado: el segundo toque borra. Se pinta de naranja para que NO se pueda
+     confundir con el estado normal, y vuelve solo a los 4 segundos. */
+  #btnVaciarRapido.confirmar{
+    background:#fff4e5; border-color:var(--danger); color:var(--danger);
   }
   #comentBox{margin-top:8px;}
   #comentBox textarea{min-height:56px;}
@@ -544,7 +574,17 @@
       <button type="button" id="btnComent" class="ph-com" title="Comentarios del pedido"
               aria-label="Comentarios del pedido">💬</button>
     </div>
-    <div id="zonaBox"></div>
+    <!-- La zona y el botón de vaciar comparten renglón: los dos son piezas
+         chicas, y poniéndolos juntos el botón NO cuesta ni un píxel de alto.
+         Eso importa: la pantalla de carga se rediseñó en la v19 para que
+         entraran 5 productos, y un renglón extra acá se come uno.
+         Vaciar no va en la línea del cliente para no angostar el buscador en
+         un celular de 360 px, ni quedar pegado a lo que se toca todo el día. -->
+    <div class="ph-pie">
+      <div id="zonaBox"></div>
+      <div id="vaciarBox" hidden><button type="button" id="btnVaciarRapido"
+        title="Vaciar el pedido" aria-label="Vaciar el pedido">🗑</button></div>
+    </div>
     <div id="comentBox" hidden>
       <textarea id="comentarios" rows="2" placeholder="Notas del pedido, condiciones, fecha de entrega…"></textarea>
     </div>
@@ -840,7 +880,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v22";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v23";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1370,6 +1410,9 @@ function zonaDe(nombre){ const c = CLIENTES.find(x=>x.nombre===nombre); return c
 function existeCliente(nombre){ return CLIENTES.some(x=>x.nombre===nombre); }
 function pintarZona(){
   const nom = (estado.cliente||"").trim();
+  /* el botón de vaciar depende también del cliente, y pintarZona() es el
+     único lugar por el que pasan TODOS los caminos que lo cambian */
+  pintarVaciar();
   const box = $("#zonaBox");
   if(!nom){ box.innerHTML = ""; return; }
   if(existeCliente(nom)){
@@ -1396,6 +1439,49 @@ function pintarComent(){
 function medirHeader(){
   const h = document.querySelector("header");
   if(h) document.documentElement.style.setProperty("--hdr-h", h.offsetHeight + "px");
+}
+
+/* ==========================================================================
+   VACIAR EL PEDIDO DESDE LA PANTALLA PRINCIPAL
+   --------------------------------------------------------------------------
+   Borra todo lo cargado, así que pide confirmación — pero NO con el cartel
+   del navegador: con el propio botón, que al primer toque se pone naranja y
+   dice cuántos productos se van a borrar. Dos toques, sin cambiar de pantalla.
+
+   Por qué se desarma solo a los 4 segundos: si quedara armado, el vendedor
+   podría volver un rato después, tocar donde antes había un botón inocente y
+   perder el pedido. Un botón destructivo no puede quedarse esperando.
+   ========================================================================== */
+let vaciarArmado = null;      // el temporizador que lo desarma
+
+function desarmarVaciar(){
+  if(vaciarArmado){ clearTimeout(vaciarArmado); vaciarArmado=null; }
+  const b=$("#btnVaciarRapido");
+  if(b){ b.classList.remove("confirmar"); b.textContent="🗑"; }
+}
+
+/* Se muestra solo si hay algo que borrar: con el pedido vacío no tiene
+   sentido ocupar lugar ni tentar a nadie. */
+function pintarVaciar(){
+  const caja=$("#vaciarBox"); if(!caja) return;
+  const n=Object.keys(estado.cant||{}).length;
+  const hay = n>0 || (estado.cliente||"").trim() || (estado.comentarios||"").trim();
+  caja.hidden = !hay;
+  if(!hay) desarmarVaciar();
+}
+
+function tocarVaciar(){
+  const b=$("#btnVaciarRapido");
+  if(!b.classList.contains("confirmar")){
+    const n=Object.keys(estado.cant||{}).length;
+    b.classList.add("confirmar");
+    b.textContent = n>0 ? `¿Seguro? Borrar ${n} producto(s)` : "¿Seguro? Vaciar";
+    vaciarArmado = setTimeout(desarmarVaciar, 4000);
+    return;
+  }
+  desarmarVaciar();
+  vaciarPedido();
+  toast("Pedido vaciado");
 }
 
 function setUnidades(code, units){
@@ -1590,13 +1676,14 @@ function pintarResumen(){
   const hay = l.length>0;
   $("#btnDescargar").disabled = !hay;
   $("#btnVer").disabled = !hay;
+  pintarVaciar();
 }
 /* vaciar el pedido (para arrancar con otro cliente) */
 function vaciarPedido(){
   estado = {cliente:"", comentarios:"", cant:{}}; guardar();
   $("#cliente").value = ""; $("#comentarios").value = "";
   $("#buscar").value = "";
-  $("#comentBox").hidden = true; pintarComent();
+  $("#comentBox").hidden = true; pintarComent(); desarmarVaciar();
   pintarZona(); pintarLista(); pintarResumen(); cerrarModal();
 }
 
@@ -3969,7 +4056,12 @@ iniciarHistorial()
   .then(()=> initAuth())
   .then(()=>{ pintarHistorial(); pintarSyncBar(); sincronizar(); });
 $("#comentarios").value = estado.comentarios || "";
-$("#comentarios").addEventListener("input", ()=>{ estado.comentarios = $("#comentarios").value; guardar(); pintarComent(); });
+$("#comentarios").addEventListener("input", ()=>{
+  estado.comentarios = $("#comentarios").value; guardar(); pintarComent(); pintarVaciar(); });
+$("#btnVaciarRapido").addEventListener("click", tocarVaciar);
+/* si toca en cualquier otro lado, se desarma: nadie deja un botón de borrar
+   esperando mientras hace otra cosa */
+document.addEventListener("click", e=>{ if(!e.target.closest("#btnVaciarRapido")) desarmarVaciar(); });
 $("#btnComent").addEventListener("click", ()=>{
   const caja = $("#comentBox");
   const abrir = caja.hidden;
