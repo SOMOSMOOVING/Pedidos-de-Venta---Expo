@@ -840,7 +840,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v21";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v22";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1708,17 +1708,39 @@ const MSG_SCAN = "Apuntá al código · a unos 15-20 cm · tocá la pantalla par
 function lenteNoSirve(label){
   return /ultra|gran\s*angular|wide|0\.5|tele|macro|depth|profundidad|monochrom/i.test(label||"");
 }
-async function elegirCamaraTrasera(){
+/* El número de la etiqueta de Android: "camera2 0, facing back" -> 0.
+   En Android la cámara 0 es SIEMPRE la trasera principal, y es la única que
+   tiene el flash pegado. Las otras traseras (2, 4, 6...) son la gran angular,
+   el teleobjetivo o la macro, y NO tienen linterna.
+
+   Esto se descubrió con un Galaxy S23 Ultra: sus etiquetas son genéricas
+   ("camera 0", "camera 2"...), así que el filtro por nombre no descartaba
+   ninguna y nos quedábamos con la primera que enumeraba Android — que era la
+   2. Resultado: el botón de la linterna no aparecía nunca, porque esa lente
+   de verdad no la tiene. */
+function indiceLente(label){
+  const m=/camera\s*2?\s+(\d+)/i.exec(label||"");
+  return m ? parseInt(m[1],10) : 99;
+}
+
+/* Devuelve las traseras ordenadas de mejor a peor candidata. */
+async function camarasTraseras(){
   try{
-    if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+    if(!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
     const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
-    if(ds.length<2) return null;                       // una sola cámara: no hay qué elegir
+    if(ds.length<2) return [];                         // una sola cámara: no hay qué elegir
     const traseras=ds.filter(d=>/back|rear|trasera|environment|posterior/i.test(d.label||""));
     const base=traseras.length?traseras:ds;
-    const buena=base.filter(d=>!lenteNoSirve(d.label));
-    const elegida=buena[0]||base[0];
-    return elegida ? elegida.deviceId||null : null;
-  }catch(e){ return null; }
+    const buenas=base.filter(d=>!lenteNoSirve(d.label));
+    const lista=(buenas.length?buenas:base).slice();
+    lista.sort((a,b)=>indiceLente(a.label)-indiceLente(b.label));
+    return lista;
+  }catch(e){ return []; }
+}
+
+async function elegirCamaraTrasera(){
+  const l=await camarasTraseras();
+  return l.length ? (l[0].deviceId||null) : null;
 }
 /* Cadena de intentos, de lo mejor a lo que seguro funciona. Si un celular no
    puede con la resolución alta, no se queda sin escáner: baja un escalón. */
@@ -1869,14 +1891,26 @@ async function abrirScan(){
   prepararAudio();   // iPhone: el audio solo se habilita dentro del toque del usuario
   const v=$("#scanVideo");
   if('BarcodeDetector' in window){
-    let id=null;
-    try{ id=await elegirCamaraTrasera(); }catch(e){}
-    try{ scanStream = await abrirCamara(id); }
-    catch(e){ return scanError(e); }
-    if(!scanRunning){ scanStream.getTracks().forEach(t=>t.stop()); return; }
-    v.srcObject=scanStream;
-    try{ await v.play(); }catch(e){}
-    await afinarCamara();
+    let lentes=[]; try{ lentes=await camarasTraseras(); }catch(e){}
+    const ids = lentes.length ? lentes.map(d=>d.deviceId||null) : [null];
+    /* Se prueba la primera candidata (la cámara 0, la principal). Si resulta
+       que NO tiene linterna y hay otra trasera sin probar, se abre esa: el
+       objetivo es quedarse con la lente que sí la tiene. Como mucho se
+       intentan dos, para no hacer lento el arranque en celulares sin flash. */
+    let intento=0;
+    for(;;){
+      try{ scanStream = await abrirCamara(ids[intento]); }
+      catch(e){ if(intento+1<Math.min(ids.length,2)){ intento++; continue; } return scanError(e); }
+      if(!scanRunning){ scanStream.getTracks().forEach(t=>t.stop()); return; }
+      v.srcObject=scanStream;
+      try{ await v.play(); }catch(e){}
+      await afinarCamara();
+      const hayOtra = intento+1 < Math.min(ids.length,2);
+      if(scanCaps.torch || !hayOtra) break;
+      // esta lente no tiene flash: soltarla y probar la siguiente
+      try{ scanStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+      intento++;
+    }
     try{ scanDetector = new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128']}); }
     catch(e){ scanDetector = new BarcodeDetector(); }
     $("#scanMsg").textContent=MSG_SCAN;
