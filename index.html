@@ -307,6 +307,13 @@
   #btnVaciarRapido.confirmar{
     background:#fff4e5; border-color:var(--danger); color:var(--danger);
   }
+  /* BORRAR UN PEDIDO DEL SERVIDOR (solo admin)
+     Mismo mecanismo de dos toques que el 🗑 del pedido, porque acá no hay
+     marcha atrás: el pedido se borra de la base y no se recupera. */
+  #btnSrvDetBorrar{color:var(--danger); border-color:#f0d9b0;}
+  #btnSrvDetBorrar.confirmar{background:var(--danger); border-color:var(--danger); color:#fff;}
+  #srvBorrarAviso{background:#fff4e5; border:1px solid #f0d9b0; color:var(--danger);
+    border-radius:10px; padding:9px 11px; font-size:12.5px; font-weight:600; margin:0 0 10px;}
   #comentBox{margin-top:8px;}
   #comentBox textarea{min-height:56px;}
   .ped-head .zona{margin-top:8px;}
@@ -687,9 +694,13 @@
   <div class="sheet">
     <h2 id="srvDetTit">Pedido</h2>
     <div class="body" id="srvDetBody"></div>
+    <!-- Aviso de borrado: aparece recién con el primer toque del 🗑 y dice
+         exactamente qué se va a borrar. El botón solo existe para el admin. -->
+    <div id="srvBorrarAviso" hidden></div>
     <div class="foot">
       <button class="btn ghost" id="btnSrvDetVolver" style="flex:1 1 0; min-width:0; padding:12px 6px">Volver</button>
       <button class="btn ghost" id="btnSrvDetAnular" style="flex:1 1 0; min-width:0; padding:12px 6px">Anular</button>
+      <button class="btn ghost peligro" id="btnSrvDetBorrar" hidden style="flex:1 1 0; min-width:0; padding:12px 6px">🗑 Borrar</button>
       <button class="btn" id="btnSrvDetXls" style="flex:1 1 0; min-width:0; padding:12px 6px">⬇ Excel</button>
     </div>
   </div>
@@ -880,7 +891,7 @@ function nombreArchivoSeguro(s){
    señal y con el token vencido. El servidor sirve para sincronizar y para
    la trazabilidad, nunca es requisito para trabajar.
    ========================================================================== */
-const APP_VERSION = "v23";   // se muestra en Administración -> Estado de la app
+const APP_VERSION = "v25";   // se muestra en Administración -> Estado de la app
 const SB_URL = "https://qjnvkfumrjytfhqlxuga.supabase.co";
 const SB_KEY = "sb_publishable_5HSe7XqWzr-DpEIh1FP37A_Xzo0aMfk";
 
@@ -1245,6 +1256,87 @@ function marcarSync(id, estado){
   guardarHistorial(h);
 }
 function pendientes(){ return historial().filter(p=>p.sync!=="ok"); }
+
+/* ==========================================================================
+   BORRADO PROGRAMADO DEL HISTORIAL LOCAL   (v24 — 15/09/2026)
+   --------------------------------------------------------------------------
+   Los pedidos de prueba se borran del servidor con un DELETE, pero el
+   historial vive DENTRO de cada celular (IndexedDB) y desde el servidor no se
+   puede tocar. Con 10 vendedores, pedirles que cada uno entre y apriete un
+   botón es la forma segura de que a alguno se le pase.
+
+   Entonces el borrado viaja en la app: `RESET_HISTORIAL` es una fecha, y cada
+   celular guarda cuál fue la última que ejecutó. Cuando abre una versión con
+   una fecha distinta a la suya, borra el historial, la cola de subida y el
+   pedido a medio cargar, se anota la fecha y no lo vuelve a hacer nunca más.
+   Nadie toca nada y ningún celular queda afuera.
+
+   Para repetirlo en el futuro (otra expo, otra tanda de pruebas): cambiar la
+   fecha de RESET_HISTORIAL y publicar. Poner la constante en "" lo desactiva.
+
+   ⚠️ LA RED DE SEGURIDAD: `RESET_HASTA`
+   La marca sola alcanzaría, pero deja el "no se repite" apoyado en un dato que
+   vive en localStorage. Si por lo que fuera ese dato se perdiera, el borrado
+   volvería a correr — y eso, en plena expo, sería perder pedidos de verdad.
+   Por eso el borrado NO puede tocar cualquier pedido: solo borra los ANTERIORES
+   a `RESET_HASTA`, un instante fijo y escrito en la app. Un pedido cargado
+   después de ese momento no lo puede borrar ni aunque el reset se ejecutara mil
+   veces. El "pasa una sola vez" deja de ser una promesa y pasa a ser imposible.
+
+   Y ante la duda no se borra: un pedido sin fecha, o con una fecha ilegible,
+   se conserva. Que sobre un pedido viejo es molesto; que falte uno real, no.
+
+   Dos detalles más que importan:
+   · Corre ANTES de sincronizar(). Si corriera después, un celular con pedidos
+     viejos en la cola los subiría al servidor recién vaciado y volveríamos a
+     empezar.
+   · Si el borrado falla (IndexedDB bloqueada, por ejemplo) NO se anota la
+     fecha, así que se reintenta la próxima vez que abra la app. Es preferible
+     reintentar a dar por hecho un borrado que no pasó.
+   ========================================================================== */
+const RESET_HISTORIAL = "2026-09-15";          // "" = desactivado
+/* Instante de corte, en UTC. 2026-09-15 03:30 UTC = 00:30 en Argentina, el
+   momento en que Máximo pidió el borrado. Todo lo cargado ANTES se borra;
+   todo lo de después queda blindado para siempre. */
+const RESET_HASTA = "2026-09-15T03:30:00.000Z";
+const RESET_KEY = "pedidoExpoResetHecho";
+
+/* ¿Este pedido es de los de prueba, o sea anterior al corte?
+   Sin fecha legible devuelve false: ante la duda, no se borra. */
+function anteriorAlCorte(p){
+  const t = Date.parse(String((p && p.fechaISO) || ""));
+  const corte = Date.parse(RESET_HASTA);
+  return isFinite(t) && isFinite(corte) && t < corte;
+}
+
+async function resetHistorial(){
+  if(!RESET_HISTORIAL) return false;
+  let hecho=null;
+  try{ hecho=localStorage.getItem(RESET_KEY); }catch(e){}
+  if(hecho===RESET_HISTORIAL) return false;    // este celular ya lo hizo
+  const viejos=(HIST||[]).filter(anteriorAlCorte);
+  const habia=viejos.length;
+  try{
+    if(habia){
+      const ids=viejos.map(p=>p.id);
+      const quedan=(HIST||[]).filter(p=>!anteriorAlCorte(p));
+      if(idb) await idbEscribir([], ids);
+      else { try{ localStorage.setItem(HIST_KEY, JSON.stringify(quedan)); }catch(e){} }
+      HIST=quedan;                             // recién acá, si el disco no falló
+    }
+  }catch(e){ return false; }                   // sin anotar: se reintenta
+  estado={cliente:"", comentarios:"", cant:{}}; guardar();
+  try{
+    $("#cliente").value=""; $("#comentarios").value=""; $("#buscar").value="";
+    $("#comentBox").hidden=true;
+    pintarComent(); pintarZona(); pintarLista(); pintarResumen();
+  }catch(e){}
+  try{ localStorage.setItem(RESET_KEY, RESET_HISTORIAL); }catch(e){}
+  if(habia) setTimeout(()=>toast(
+    `Historial borrado (${habia} pedido${habia===1?"":"s"} de prueba): la app arranca en 0 para la expo`,
+    false, 7000), 900);
+  return true;
+}
 
 /* ==========================================================================
    SINCRONIZACIÓN CON EL SERVIDOR
@@ -1728,10 +1820,10 @@ function agregarUMV(p){
   setUnidades(p.codigo, base + p.umv);          // suma 1 UMV
 }
 let toastT=null;
-function toast(msg, err){
+function toast(msg, err, ms){
   const t=$("#toast"); t.textContent=msg;
   t.classList.toggle("err", !!err); t.classList.add("show");
-  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"), 1800);
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"), ms||1800);
 }
 function buscarProducto(q){
   q=String(q).trim().toLowerCase();
@@ -2461,10 +2553,20 @@ async function construirXLSXVarias(hojas){
   return await zipStore(partes);
 }
 
-/* ====== PEDIDO -> EXCEL ====== */
-const COLS_PEDIDO = ["Estado","Cliente","Zona","Vendedor","Fecha","Comentarios","Código","Descripción",
+/* ====== PEDIDO -> EXCEL ======
+   ⚠️ LOS PEDIDOS ANULADOS NO SALEN EN NINGUNA PLANILLA (pedido de Máximo, 15/09).
+   Antes salían marcados con una columna "Estado" y sin sumar en los totales. La
+   planilla es lo que se manda a la oficina: un pedido anulado ahí es ruido que
+   alguien puede leer como un pedido de verdad. Se filtran en los tres export:
+   el Resumen y el Detalle del admin, y el consolidado de cada vendedor.
+   Siguen existiendo en la app y en la base, con su fecha y su motivo: no se
+   pierde el registro, desaparecen de las planillas.
+   El Excel de UN pedido suelto es la excepción: si el admin abre un pedido
+   anulado y lo baja, la cabecera sigue diciendo PEDIDO ANULADO. Ahí lo está
+   pidiendo expresamente. */
+const COLS_PEDIDO = ["Cliente","Zona","Vendedor","Fecha","Comentarios","Código","Descripción",
                      "Unidades por UMV","Cantidad UMV","Unidades","Precio unit.","Total"];
-const ANCHOS_PEDIDO = [10,34,20,14,17,28,12,42,17,13,10,12,14];
+const ANCHOS_PEDIDO = [34,20,14,17,28,12,42,17,13,10,12,14];
 
 function fechaCortaISO(iso){
   const d=new Date(iso||"");
@@ -2508,7 +2610,6 @@ function armarPedido(){
    porque son los que se usan para ordenar y filtrar. --- */
 function filasDePedido(ped){
   return ped.lineas.map((x,i)=>[
-    CT(ped.anulado?"ANULADO":""),
     CT(ped.cliente), CT(ped.zona),
     CT(vendedorParaExcel(ped.vendedor, ped.vendedorOrigen, ped.importado)), CT(ped.fecha),
     CT(i===0 ? (ped.comentarios||"") : ""),
@@ -2694,9 +2795,13 @@ function reabrirPedido(id){
 }
 /* ====== EXCEL CONSOLIDADO: todos los pedidos agrupados por cliente ====== */
 async function exportarConsolidado(){
-  const h=historial();
-  if(h.length===0){ alert("No hay pedidos en el historial."); return; }
-  const nAnul=h.filter(p=>p.anulado).length;
+  const todos=historial();
+  const h=todos.filter(p=>!p.anulado);            // los anulados no van a la planilla
+  if(h.length===0){
+    alert(todos.length ? "Todos los pedidos del historial están anulados: no hay nada para exportar."
+                       : "No hay pedidos en el historial.");
+    return;
+  }
   // agrupar por cliente, respetando el orden de aparición
   const grupos=new Map();
   h.slice().reverse().forEach(p=>{               // del más viejo al más nuevo
@@ -2709,18 +2814,17 @@ async function exportarConsolidado(){
     let sU=0, sP=0, sM=0;
     peds.forEach(ped=>{
       filasDePedido(ped).forEach(r=>rows.push(r));
-      if(ped.anulado) return;                     // los anulados no suman
       sU+=ped.totalUnidades; sP+=ped.totalUMV; sM+=(ped.totalPesos||0);
     });
-    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+    rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
                CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)]);
     rows.push([]);                                // fila en blanco entre clientes
     gU+=sU; gP+=sP; gM+=sM;
   }
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL (sin anulados)"),
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
              CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)]);
-  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
-             CTB(`${h.length-nAnul} pedido(s) · ${grupos.size} cliente(s)`+(nAnul?` · ${nAnul} anulado(s)`:""))]);
+  rows.push([CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${h.length} pedido(s) · ${grupos.size} cliente(s)`)]);
   descargarBlob(await construirXLSX(rows,{hoja:"Pedidos", anchos:ANCHOS_PEDIDO}),
     `pedidos_consolidado_${nombreArchivoSeguro(usuarioActual()||"todos")}_${hoyLocal()}.xlsx`);
 }
@@ -2918,6 +3022,10 @@ async function abrirDetalleServidor(id){
   $("#srvDetTit").textContent="Pedido";
   $("#srvDetBody").innerHTML=`<div class="empty">Buscando el pedido…</div>`;
   $("#btnSrvDetXls").disabled=true; $("#btnSrvDetAnular").disabled=true;
+  /* el botón de borrar solo existe para el admin, y arranca siempre desarmado */
+  $("#btnSrvDetBorrar").hidden = !esAdmin();
+  $("#btnSrvDetBorrar").disabled = true;
+  desarmarBorrarServidor();
   SRV_DET=null;
   if(!navigator.onLine){
     $("#srvDetBody").innerHTML=`<div class="empty">Sin internet.<br>Los artículos del pedido se leen del servidor.</div>`;
@@ -2940,6 +3048,8 @@ function pintarDetalleServidor(p){
   $("#btnSrvDetXls").disabled=false;
   $("#btnSrvDetAnular").disabled=!!d.anulado;
   $("#btnSrvDetAnular").textContent = d.anulado ? "Anulado" : "Anular";
+  $("#btnSrvDetBorrar").hidden = !esAdmin();
+  $("#btnSrvDetBorrar").disabled = false;
   let h="";
   if(d.anulado){
     h+=`<div class="det-aviso">PEDIDO ANULADO el ${escH(fechaCortaISO(d.anuladoISO))}`+
@@ -3021,6 +3131,97 @@ async function anularPedidoServidor(){
   b.textContent = SRV_DET && SRV_DET.anulado ? "Anulado" : t;
 }
 
+/* ==========================================================================
+   BORRAR UN PEDIDO DEL SERVIDOR — SOLO EL ADMINISTRADOR
+   --------------------------------------------------------------------------
+   Anular y borrar son dos cosas distintas y conviene no confundirlas:
+     · ANULAR lo puede hacer el vendedor. El pedido queda, marcado, con fecha y
+       motivo. Es el camino normal cuando alguien se equivocó.
+     · BORRAR lo hace solo el admin y NO SE PUEDE DESHACER: el renglón
+       desaparece de la base. Es para limpiar, no para corregir.
+
+   Por eso son dos toques, igual que el 🗑 del pedido en la pantalla principal,
+   pero acá el primer toque además ABRE UN AVISO QUE DICE QUÉ SE VA A BORRAR
+   (cliente, fecha e importe). Un "¿seguro?" pelado no ayuda si uno abrió el
+   pedido equivocado: lo que evita el error es ver el dato.
+
+   Tres cierres más:
+   · El botón solo existe si `esAdmin()`. Y aunque alguien lo forzara, el RLS
+     de Supabase rechaza el DELETE de cualquiera que no sea admin.
+   · Se desarma solo a los 5 segundos y al tocar en cualquier otro lado.
+   · Se avisa si el pedido todavía está sin subir en el celular del vendedor:
+     en ese caso la cola lo vuelve a subir y reaparece. No es un error de la
+     app; hay que saberlo para no volverse loco buscando el fantasma.
+   ========================================================================== */
+let borrarArmado=null;
+
+function desarmarBorrarServidor(){
+  clearTimeout(borrarArmado); borrarArmado=null;
+  const b=$("#btnSrvDetBorrar");
+  if(b){ b.classList.remove("confirmar"); b.textContent="🗑 Borrar"; }
+  const a=$("#srvBorrarAviso");
+  if(a){ a.hidden=true; a.innerHTML=""; }
+}
+
+function tocarBorrarServidor(){
+  if(!SRV_DET || !esAdmin()) return;
+  const b=$("#btnSrvDetBorrar");
+  if(!b.classList.contains("confirmar")){
+    const d=pedidoDesdeServidor(SRV_DET);
+    const a=$("#srvBorrarAviso");
+    a.innerHTML = `Vas a BORRAR para siempre el pedido de <b>${escH(d.cliente||"—")}</b>`+
+      (d.fecha?` del ${escH(d.fecha)}`:"")+
+      ` · ${d.totalUnidades||0} u. · $ ${fmtPrecio(d.totalPesos||0)}.<br>`+
+      `No se puede deshacer. Si solo querés dejar constancia de que no va, usá <b>Anular</b>.`;
+    a.hidden=false;
+    b.classList.add("confirmar"); b.textContent="Sí, borrar";
+    borrarArmado=setTimeout(desarmarBorrarServidor, 5000);
+    return;
+  }
+  desarmarBorrarServidor();
+  borrarPedidoServidor();
+}
+
+async function borrarPedidoServidor(){
+  if(!SRV_DET || !esAdmin()) return;
+  const id=String(SRV_DET.id), ref=String(SRV_DET.pedido_ref||"");
+  const b=$("#btnSrvDetBorrar"), t=b.textContent;
+  b.disabled=true; b.textContent="Borrando…";
+  try{
+    const tok=await tokenValido();
+    if(!tok) throw new Error("no se pudo validar la sesión");
+    const r=await fetch(`${SB_URL}/rest/v1/pedidos?id=eq.${encodeURIComponent(id)}`,{
+      method:"DELETE",
+      headers:{apikey:SB_KEY, Authorization:"Bearer "+tok, Prefer:"return=representation"}});
+    if(!r.ok){
+      let x=""; try{ x=(await r.text()).slice(0,200); }catch(e){}
+      throw new Error(`el servidor respondió ${r.status}${x?" — "+x:""}`);
+    }
+    /* con return=representation el servidor devuelve lo que borró: si vuelve
+       vacío, no borró nada (RLS) y no hay que mentirle al usuario */
+    let borradas=null;
+    try{ const l=await r.json(); if(Array.isArray(l)) borradas=l.length; }catch(e){}
+    if(borradas===0) throw new Error("el servidor no borró nada (¿tu usuario no es admin?)");
+
+    PED_CACHE.delete(id);
+    const i=SRV_PEDIDOS.findIndex(x=>String(x.id)===id);
+    if(i>=0) SRV_PEDIDOS.splice(i,1);
+    SRV_DET=null;
+    $("#srvDetModal").classList.remove("open");
+    pintarPedidosServidor();
+    /* si el vendedor todavía lo tiene sin subir, la cola lo va a volver a subir */
+    const mio=historial().find(p=>String(p.id)===ref);
+    toast(mio && mio.sync!=="ok"
+      ? "Pedido borrado. Ojo: en este celular está sin subir y se va a volver a subir."
+      : "Pedido borrado del servidor", false, 5000);
+  }catch(e){
+    alert("No se pudo borrar el pedido.\n\n"+e.message);
+    b.disabled=false; b.textContent="🗑 Borrar";
+    return;
+  }
+  b.disabled=false; b.textContent="🗑 Borrar";
+}
+
 /* Excel de todo lo que hay en el servidor, agrupado por cliente */
 /* ==========================================================================
    EXCEL DEL ADMINISTRADOR
@@ -3032,9 +3233,9 @@ async function anularPedidoServidor(){
    El "Resumen" (un renglón por pedido) es lo que se usa día a día: son 1300
    filas, sale al instante y se abre en cualquier máquina.
    ========================================================================== */
-const COLS_RESUMEN=["Estado","Cliente","Zona","Vendedor","Fecha","Comentarios","Productos distintos",
-                    "Cantidad UMV","Unidades","Total","Anulado el","Motivo anulación"];
-const ANCHOS_RESUMEN=[10,38,22,20,17,30,18,13,11,15,17,30];
+const COLS_RESUMEN=["Cliente","Zona","Vendedor","Fecha","Comentarios","Productos distintos",
+                    "Cantidad UMV","Unidades","Total"];
+const ANCHOS_RESUMEN=[38,22,20,17,30,18,13,11,15];
 
 async function exportarResumenServidor(){
   if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
@@ -3042,27 +3243,24 @@ async function exportarResumenServidor(){
   btn.disabled=true; btn.textContent="Armando…";
   try{
     // ya tenemos los totales en SRV_PEDIDOS: no hace falta pedir nada más
-    const l=SRV_PEDIDOS.slice().sort((a,b)=>
+    const l=SRV_PEDIDOS.filter(p=>!p.anulado).sort((a,b)=>
       (a.cliente||"").localeCompare(b.cliente||"") || String(a.fecha).localeCompare(String(b.fecha)));
+    if(!l.length){ alert("Todos los pedidos que estás viendo están anulados: no hay nada para exportar.");
+      btn.disabled=false; btn.textContent=orig; return; }
     const rows=[COLS_RESUMEN.map(CTB)];
     let gL=0,gP=0,gU=0,gM=0;
-    let nAnul=0;
     l.forEach(p=>{
       const d=new Date(p.fecha);
-      const da=p.anulado_en?new Date(p.anulado_en):null;
-      rows.push([CT(p.anulado?"ANULADO":""),
-        CT(p.cliente||""),CT(p.zona||""),
+      rows.push([CT(p.cliente||""),CT(p.zona||""),
         CT(vendedorParaExcel(p.vendedor_nombre||p.vendedor_email||"", p.vendedor_origen, p.importado)),
         CT(isNaN(d)?String(p.fecha||""):fechaHora(d)),CT(p.comentarios||""),
         CN(Number(p.total_lineas)||0),CN(Number(p.total_umv)||0),
-        CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0),
-        CT(da&&!isNaN(da)?fechaHora(da):""),CT(p.anulado_motivo||"")]);
-      if(p.anulado){ nAnul++; return; }                 // los anulados no suman
+        CN(Number(p.total_unidades)||0),CM(Number(p.total_pesos)||0)]);
       gL+=Number(p.total_lineas)||0; gP+=Number(p.total_umv)||0;
       gU+=Number(p.total_unidades)||0; gM+=Number(p.total_pesos)||0;
     });
-    rows.push([CT(""),CTB(`TOTAL — ${l.length-nAnul} pedido(s)`+(nAnul?` (${nAnul} anulado(s) no sumados)`:"")),
-      CT(""),CT(""),CT(""),CT(""),CNB(gL),CNB(gP),CNB(gU),CMB(gM),CT(""),CT("")]);
+    rows.push([CTB(`TOTAL — ${l.length} pedido(s)`),
+      CT(""),CT(""),CT(""),CT(""),CNB(gL),CNB(gP),CNB(gU),CMB(gM)]);
     descargarBlob(await construirXLSX(rows,{hoja:"Resumen", anchos:ANCHOS_RESUMEN}),
       `pedidos_resumen_${hoyLocal()}.xlsx`);
     toast(`✓ Resumen de ${l.length} pedido(s)`);
@@ -3072,7 +3270,11 @@ async function exportarResumenServidor(){
 
 async function exportarServidor(){
   if(!SRV_PEDIDOS.length){ alert("No hay pedidos para exportar."); return; }
-  const renglones=SRV_PEDIDOS.reduce((s,p)=>s+(Number(p.total_lineas)||0),0);
+  if(!SRV_PEDIDOS.some(p=>!p.anulado)){
+    alert("Todos los pedidos que estás viendo están anulados: no hay nada para exportar."); return;
+  }
+  /* los anulados ni se cuentan para el límite de renglones: no se van a bajar */
+  const renglones=SRV_PEDIDOS.filter(p=>!p.anulado).reduce((s,p)=>s+(Number(p.total_lineas)||0),0);
   if(renglones>1048000){
     alert(`Son ${renglones.toLocaleString("es-AR")} renglones y una hoja de Excel aguanta 1.048.576.\n\n`+
           `Usá el filtro para bajarlo por vendedor o por zona, o bajá el Resumen.`);
@@ -3095,12 +3297,14 @@ async function exportarServidor(){
   await new Promise(r=>setTimeout(r,30));
   try{
     // agrupar por cliente, del más viejo al más nuevo dentro de cada uno
+    // (los anulados no entran: no van a la planilla)
     const grupos=new Map();
+    todos=todos.filter(p=>!p.anulado);
     todos.slice().reverse().forEach(p=>{
       if(!grupos.has(p.cliente)) grupos.set(p.cliente,[]);
       grupos.get(p.cliente).push(p);
     });
-    let gU=0,gP=0,gM=0, nRen=0, nAnulDet=0;
+    let gU=0,gP=0,gM=0, nRen=0;
     const filas = function*(){
       yield COLS_PEDIDO.map(CTB);
       for(const [cliente,peds] of grupos){
@@ -3112,25 +3316,23 @@ async function exportarServidor(){
           const vend=vendedorParaExcel(p.vendedor_nombre||p.vendedor_email||"", p.vendedor_origen, p.importado);
           for(const x of (p.lineas||[])){
             nRen++;
-            yield [CT(p.anulado?"ANULADO":""),
-              CT(p.cliente||""),CT(p.zona||""),CT(vend),CT(f),
+            yield [CT(p.cliente||""),CT(p.zona||""),CT(vend),CT(f),
               CT(primera ? (p.comentarios||"") : ""),CT(String(x.codigo||"")),CT(x.nombre||""),
               CN(Number(x.umv)||0),CN(Number(x.packs)||0),CN(Number(x.unidades)||0),
               CM(Number(x.precio)||0),CM(Number(x.total)||0)];
             primera=false;
           }
-          if(p.anulado){ nAnulDet++; continue; }          // los anulados no suman
           sU+=Number(p.total_unidades)||0; sP+=Number(p.total_umv)||0; sM+=Number(p.total_pesos)||0;
         }
-        yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
+        yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB(`Subtotal ${cliente}`),
                CT(""),CNB(sP),CNB(sU),CT(""),CMB(sM)];
         yield [];
         gU+=sU; gP+=sP; gM+=sM;
       }
-      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL (sin anulados)"),
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CTB("TOTAL GENERAL"),
              CT(""),CNB(gP),CNB(gU),CT(""),CMB(gM)];
-      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
-             CTB(`${todos.length-nAnulDet} pedido(s) · ${grupos.size} cliente(s)`+(nAnulDet?` · ${nAnulDet} anulado(s)`:""))];
+      yield [CT(""),CT(""),CT(""),CT(""),CT(""),CT(""),
+             CTB(`${todos.length} pedido(s) · ${grupos.size} cliente(s)`)];
     };
     const blob = await construirXLSXGrande(filas, {hoja:"Pedidos", anchos:ANCHOS_PEDIDO,
       avance: n=>{ btn.textContent=`Armando… ${Math.round(n/1000)}k`; }});
@@ -3161,6 +3363,16 @@ async function revisarEstado(){
   html+=fila("Sos admin", esAdmin() ? si("sí") : no("no"));
   if(!esAdmin()) arreglos.push("Tu mail no está en la tabla <b>admins</b> de Supabase, o está escrito distinto.");
   html+=fila("En este celular", `${historial().length} pedido(s), ${pendientes().length} sin subir`);
+  /* Para poder confirmar, celular por celular, que el borrado programado corrió. */
+  if(RESET_HISTORIAL){
+    let hecho=null; try{ hecho=localStorage.getItem(RESET_KEY); }catch(e){}
+    const corte=new Date(RESET_HASTA);
+    const cuando=isFinite(corte) ? corte.toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : RESET_HASTA;
+    html+=fila("Borrado programado", (hecho===RESET_HISTORIAL
+      ? si(`hecho (${escH(RESET_HISTORIAL)})`)
+      : no(`pendiente (${escH(RESET_HISTORIAL)}) — cerrá y abrí la app`))
+      + `<br><small>solo alcanza a pedidos anteriores al ${escH(cuando)}</small>`);
+  }
   /* Diagnóstico de la cámara: se llena al abrir el escáner una vez. Sirve para
      saber, en un celular concreto, por qué no aparece el botón de la linterna. */
   if(SCAN_ULTIMO){
@@ -3270,8 +3482,13 @@ function initServidor(){
     const id=fila.getAttribute("data-id");
     if(id) abrirDetalleServidor(id);
   });
-  const cerrarDet = ()=> $("#srvDetModal").classList.remove("open");
+  const cerrarDet = ()=>{ desarmarBorrarServidor(); $("#srvDetModal").classList.remove("open"); };
   $("#btnSrvDetVolver").addEventListener("click", cerrarDet);
+  $("#btnSrvDetBorrar").addEventListener("click", tocarBorrarServidor);
+  /* si toca en cualquier otro lado del pedido, se desarma: nadie deja un botón
+     de borrar esperando mientras lee el pedido */
+  $("#srvDetModal").addEventListener("click", e=>{
+    if(!e.target.closest("#btnSrvDetBorrar")) desarmarBorrarServidor(); });
   $("#srvDetModal").addEventListener("click", e=>{ if(e.target.id==="srvDetModal") cerrarDet(); });
   $("#btnSrvDetXls").addEventListener("click", descargarPedidoServidor);
   $("#btnSrvDetAnular").addEventListener("click", anularPedidoServidor);
@@ -4053,6 +4270,10 @@ initHistorial();
 initServidor();
 initImportPedido();
 iniciarHistorial()
+  /* el borrado programado va acá: DESPUÉS de leer el historial y ANTES de
+     sincronizar, para que un celular con pedidos viejos en la cola no los
+     suba al servidor recién vaciado */
+  .then(()=> resetHistorial())
   .then(()=> initAuth())
   .then(()=>{ pintarHistorial(); pintarSyncBar(); sincronizar(); });
 $("#comentarios").value = estado.comentarios || "";
